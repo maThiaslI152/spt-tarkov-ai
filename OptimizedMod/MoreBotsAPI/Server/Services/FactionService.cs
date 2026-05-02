@@ -1,0 +1,651 @@
+using MoreBotsServer.Models;
+using SPTarkov.DI.Annotations;
+using SPTarkov.Server.Core.Helpers;
+using SPTarkov.Server.Core.Models.Eft.Common;
+using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Utils;
+using SPTarkov.Server.Core.Services;
+using SPTarkov.Server.Core.Services.Mod;
+using SPTarkov.Server.Core.Utils;
+
+namespace MoreBotsServer.Services;
+
+[Injectable(InjectionType.Singleton)]
+public class FactionService
+{
+    private readonly MoreBotsLogger logger;
+    private readonly DatabaseService databaseService;
+    private readonly ProfileDataService profileDataService;
+    private readonly ProfileActivityService profileActivityService;
+    private readonly JsonUtil jsonUtil;
+    private readonly MoreBotsCustomBotTypeService customBotTypeService;
+
+    private const string ModKey = "MoreBotsAPI";
+
+    public FactionService(
+        MoreBotsLogger logger,
+        DatabaseService databaseService,
+        ProfileDataService profileDataService,
+        ProfileActivityService profileActivityService,
+        JsonUtil jsonUtil,
+        MoreBotsCustomBotTypeService botTypeService
+    )
+    {
+        this.logger = logger;
+        this.databaseService = databaseService;
+        this.profileDataService = profileDataService;
+        this.profileActivityService = profileActivityService;
+        this.customBotTypeService = botTypeService;
+        this.jsonUtil = jsonUtil;
+        InitFactions();
+    }
+
+    public Dictionary<string, Faction> Factions { get; } = new();
+
+    public void InitFactions()
+    {
+        LoadDefaultFactions();
+    }
+
+    public Dictionary<string, Faction> GetFactions()
+    {
+        return Factions;
+    }
+
+    public Dictionary<string, Faction> GetAllFactions()
+    {
+        return Factions;
+    }
+
+    public Dictionary<string, List<string>> GetFactionsRevenges()
+    {
+        var profileRevenges = new Dictionary<string, List<string>>();
+        foreach (string profileID in profileActivityService.GetActiveProfileIdsWithinMinutes(10))
+        {
+            profileRevenges[profileID] = new List<string>();
+            var profileData = profileDataService.GetProfileData<ProfileData>(profileID, ModKey) ?? new ProfileData();
+
+            var revengeData = profileData.RevengeRaidsLeft;
+            foreach ((var faction, var raids) in revengeData)
+            {
+                if (raids > 0) profileRevenges[profileID].Add(faction);
+            }
+        }
+        return profileRevenges;
+    }
+
+    public void AdjustFactionRevenge(UpdateRevengeRequest updateRevengeRequest)
+    {
+        var profileRevengeData = updateRevengeRequest.RevengeUpdate;
+        if (profileRevengeData == null)
+        {
+            logger.Error($"Failed to parse updated revenge profile data.");
+            return;
+        }
+
+        // TODO: update this so it only affects people who were in the raid that just ended
+        foreach (string profileID in profileActivityService.GetActiveProfileIdsWithinMinutes(10))
+        {
+            var revengeData = profileDataService.GetProfileData<ProfileData>(profileID, ModKey) ?? new ProfileData();
+
+            foreach (var faction in revengeData.RevengeRaidsLeft.Keys)
+            {
+                if (revengeData.RevengeRaidsLeft[faction] > 0) revengeData.RevengeRaidsLeft[faction]--;
+                logger.Info($"{profileID} revenge raids with faction {faction} decremented to {revengeData.RevengeRaidsLeft[faction]}.");
+            }
+            
+            profileDataService.SaveProfileData(profileID, ModKey, revengeData);
+        }
+        
+        foreach ((string profileID, List<string> revengeFactions) in profileRevengeData)
+        {
+            var revengeData = profileDataService.GetProfileData<ProfileData>(profileID, ModKey) ?? new ProfileData();
+            
+            foreach (var revengeFaction in revengeFactions)
+            {
+                if (Factions.TryGetValue(revengeFaction, out var faction))
+                {
+                    revengeData.RevengeRaidsLeft[revengeFaction] = faction.RevengeRaidAmount;
+                    logger.Info($"{profileID} revenge raids with faction {revengeFaction} set to {revengeData.RevengeRaidsLeft[revengeFaction]}.");
+                }
+                else
+                {
+                    logger.Warning($"Faction '{revengeFaction}' not found when adjusting revenge after raid.");
+                }
+            }
+            
+            profileDataService.SaveProfileData(profileID, ModKey, revengeData);
+            
+        }
+    }
+    
+    public void SetRevengeAfterRaids(string factionName, bool revengeAfterRaids, int revengeRaidAmount = 3)
+    {
+        if (Factions.TryGetValue(factionName, out var faction))
+        {
+            faction.SetRevengeAfterRaids(revengeAfterRaids, revengeRaidAmount);
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionName}' not found when setting revenge after raids.");
+        }
+    }
+
+    public void AddEnemyByFaction(BotType botType, string factionName)
+    {
+        if (Factions.TryGetValue(factionName, out var faction))
+        {
+            var enemyBotTypes = faction.GetAllBotTypes();
+            logger.Info($"Adding enemy faction {factionName} {enemyBotTypes.Count}");
+            botType?.BotDifficulty["easy"]?.Mind?.EnemyBotTypes?.AddRange(enemyBotTypes);
+            botType?.BotDifficulty["normal"]?.Mind?.EnemyBotTypes?.AddRange(enemyBotTypes);
+            botType?.BotDifficulty["hard"]?.Mind?.EnemyBotTypes?.AddRange(enemyBotTypes);
+            botType?.BotDifficulty["impossible"]?.Mind?.EnemyBotTypes?.AddRange(enemyBotTypes);
+            logger.Info($"{botType?.BotDifficulty["normal"]?.Mind?.EnemyBotTypes?.Count} {botType?.BotDifficulty["normal"]?.Mind?.EnemyBotTypes}");
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionName}' not found when setting enemies for bot type '{botType}'.");
+        }
+    }
+
+    public void AddEnemyByFaction(IEnumerable<string> types, string factionName)
+    {
+        foreach (var type in types)
+        {
+            if (databaseService.GetBots().Types.TryGetValue(type.ToLowerInvariant(), out var botType))
+            {
+                logger.Info($"Adding enemy faction {factionName} to {type}");
+                AddEnemyByFaction(botType, factionName);
+            }
+            else
+            {
+                logger.Warning($"Bot type '{type}' not found when setting enemies by faction '{factionName}'.");
+            }
+        }
+    }
+
+    public void AddEnemyByFaction(string factionToChange, string factionName)
+    {
+        if (Factions.TryGetValue(factionToChange, out var faction))
+        {
+            var allyBotTypes = faction.GetAllBotTypes();
+            foreach (var type in allyBotTypes)
+            {
+                if (Enum.GetName<WildSpawnType>(type) == null && customBotTypeService.TryGetCustomTypeName((int)type) == null)
+                {
+                    logger.Warning($"Bot type enum name not found for type '{type}' when setting enemies by faction '{factionName}'.");
+                    continue;
+                }
+                if (databaseService.GetBots().Types.TryGetValue(Enum.GetName<WildSpawnType>(type)?.ToLowerInvariant() ?? customBotTypeService.GetCustomTypeNameOrEmpty((int)type), out var botType))
+                {
+                    logger.Info($"Adding enemy faction {factionName} to {type}");
+                    AddEnemyByFaction(botType, factionName);
+                }
+            }
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionToChange}' not found when setting enemies for faction.");
+        }
+    }
+
+    public void AddFriendlyByFaction(BotType botType, string factionName)
+    {
+        if (Factions.TryGetValue(factionName, out var faction))
+        {
+            var allyBotTypes = faction.GetAllBotTypes();
+            botType?.BotDifficulty["easy"]?.Mind?.FriendlyBotTypes?.AddRange(allyBotTypes);
+            botType?.BotDifficulty["normal"]?.Mind?.FriendlyBotTypes?.AddRange(allyBotTypes);
+            botType?.BotDifficulty["hard"]?.Mind?.FriendlyBotTypes?.AddRange(allyBotTypes);
+            botType?.BotDifficulty["impossible"]?.Mind?.FriendlyBotTypes?.AddRange(allyBotTypes);
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionName}' not found when setting friendlies for bot type '{botType}'.");
+        }
+    }
+
+    public void AddFriendlyByFaction(IEnumerable<string> types, string factionName)
+    {
+        foreach (var type in types)
+        {
+            if (databaseService.GetBots().Types.TryGetValue(type.ToLowerInvariant(), out var botType))
+            {
+                AddFriendlyByFaction(botType, factionName);
+            }
+            else
+            {
+                logger.Warning($"Bot type '{type}' not found when setting friendlies by faction '{factionName}'.");
+            }
+        }
+    }
+
+    public void AddFriendlyByFaction(string factionToChange, string factionName)
+    {
+        if (Factions.TryGetValue(factionToChange, out var faction))
+        {
+            var allyBotTypes = faction.GetAllBotTypes();
+
+            foreach (var type in allyBotTypes)
+            {
+                if (Enum.GetName<WildSpawnType>(type) == null && customBotTypeService.TryGetCustomTypeName((int)type) == null)
+                {
+                    logger.Warning($"Bot type enum name not found for type '{type}' when setting friendlies by faction '{factionName}'.");
+                    continue;
+                }
+
+                if (databaseService.GetBots().Types.TryGetValue(Enum.GetName<WildSpawnType>(type)?.ToLowerInvariant() ?? customBotTypeService.GetCustomTypeNameOrEmpty((int)type), out var botType))
+                {
+                    AddFriendlyByFaction(botType, factionName);
+                }
+            }
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionToChange}' not found when setting friendlies for faction.");
+        }
+    }
+
+    public void AddWarnByFaction(BotType botType, string factionName)
+    {
+        if (Factions.TryGetValue(factionName, out var faction))
+        {
+            var warnBotTypes = faction.GetAllBotTypes();
+            botType?.BotDifficulty["easy"]?.Mind?.WarnBotTypes?.AddRange(warnBotTypes);
+            botType?.BotDifficulty["normal"]?.Mind?.WarnBotTypes?.AddRange(warnBotTypes);
+            botType?.BotDifficulty["hard"]?.Mind?.WarnBotTypes?.AddRange(warnBotTypes);
+            botType?.BotDifficulty["impossible"]?.Mind?.WarnBotTypes?.AddRange(warnBotTypes);
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionName}' not found when setting warns for bot type '{botType}'.");
+        }
+    }
+
+    public void AddWarnByFaction(IEnumerable<string> types, string factionName)
+    {
+        foreach (var type in types)
+        {
+            if (databaseService.GetBots().Types.TryGetValue(type.ToLowerInvariant(), out var botType))
+            {
+                AddWarnByFaction(botType, factionName);
+            }
+            else
+            {
+                logger.Warning($"Bot type '{type}' not found when setting warns by faction '{factionName}'.");
+            }
+        }
+    }
+
+    public void AddWarnByFaction(string factionToChange, string factionName)
+    {
+        if (Factions.TryGetValue(factionToChange, out var faction))
+        {
+            var allyBotTypes = faction.GetAllBotTypes();
+
+            foreach (var type in allyBotTypes)
+            {
+                if (Enum.GetName<WildSpawnType>(type) == null && customBotTypeService.TryGetCustomTypeName((int)type) == null)
+                {
+                    logger.Warning($"Bot type enum name not found for type '{type}' when setting warns by faction '{factionName}'.");
+                    continue;
+                }
+
+                if (databaseService.GetBots().Types.TryGetValue(Enum.GetName<WildSpawnType>(type)?.ToLowerInvariant() ?? customBotTypeService.GetCustomTypeNameOrEmpty((int)type), out var botType))
+                {
+                    AddWarnByFaction(botType, factionName);
+                }
+            }
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionToChange}' not found when setting warns for faction.");
+        }
+    }
+
+    public void AddRevengeByFaction(BotType botType, string factionName)
+    {
+        if (Factions.TryGetValue(factionName, out var faction))
+        {
+            var revengeBotTypes = faction.GetAllBotTypes();
+            botType?.BotDifficulty["easy"]?.Mind?.RevengeBotTypes?.AddRange(revengeBotTypes);
+            botType?.BotDifficulty["normal"]?.Mind?.RevengeBotTypes?.AddRange(revengeBotTypes);
+            botType?.BotDifficulty["hard"]?.Mind?.RevengeBotTypes?.AddRange(revengeBotTypes);
+            botType?.BotDifficulty["impossible"]?.Mind?.RevengeBotTypes?.AddRange(revengeBotTypes);
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionName}' not found when setting revenge for bot type '{botType}'.");
+        }
+    }
+
+    public void AddRevengeByFaction(IEnumerable<string> types, string factionName)
+    {
+        foreach (var type in types)
+        {
+            if (databaseService.GetBots().Types.TryGetValue(type.ToLowerInvariant(), out var botType))
+            {
+                AddRevengeByFaction(botType, factionName);
+            }
+            else
+            {
+                logger.Warning($"Bot type '{type}' not found when setting revenge by faction '{factionName}'.");
+            }
+        }
+    }
+
+    public void AddRevengeByFaction(string factionToChange, string factionName)
+    {
+        if (Factions.TryGetValue(factionToChange, out var faction))
+        {
+            var allyBotTypes = faction.GetAllBotTypes();
+
+            foreach (var type in allyBotTypes)
+            {
+                if (Enum.GetName<WildSpawnType>(type) == null && customBotTypeService.TryGetCustomTypeName((int)type) == null)
+                {
+                    logger.Warning($"Bot type enum name not found for type '{type}' when setting revenge by faction '{factionName}'.");
+                    continue;
+                }
+                if (databaseService.GetBots().Types.TryGetValue(Enum.GetName<WildSpawnType>(type)?.ToLowerInvariant() ?? customBotTypeService.GetCustomTypeNameOrEmpty((int)type), out var botType))
+                {
+                    AddRevengeByFaction(botType, factionName);
+                }
+            }
+        }
+        else
+        {
+            logger.Warning($"Faction '{factionToChange}' not found when setting revenge for faction.");
+        }
+    }
+
+    public void LoadDefaultFactions()
+    {
+        var raiders = new Faction
+        {
+            Name = "raiders",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.pmcBot
+            }
+        };
+
+        Factions.Add(raiders.Name, raiders);
+
+        var rogues = new Faction
+        {
+            Name = "rogues",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.exUsec,
+                WildSpawnType.bossKnight,
+                WildSpawnType.followerBigPipe,
+                WildSpawnType.followerBirdEye
+            }
+        };
+
+        Factions.Add(rogues.Name, rogues);
+
+        var smugglers = new Faction
+        {
+            Name = "smugglers",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.arenaFighterEvent
+            }
+        };
+
+        Factions.Add(smugglers.Name, smugglers);
+
+        var bloodhounds = new Faction
+        {
+            Name = "bloodhounds",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.arenaFighter
+            }
+        };
+
+        Factions.Add(bloodhounds.Name, bloodhounds);
+
+        var scavs = new Faction
+        {
+            Name = "scavs",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.assault,
+                WildSpawnType.assaultGroup,
+                WildSpawnType.cursedAssault,
+                WildSpawnType.marksman,
+                WildSpawnType.crazyAssaultEvent,
+                WildSpawnType.spiritSpring,
+                WildSpawnType.spiritWinter,
+                WildSpawnType.skier,
+                WildSpawnType.peacemaker
+            }
+        };
+
+        Factions.Add(scavs.Name, scavs);
+
+        var cultists = new Faction
+        {
+            Name = "cultists",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.sectantWarrior,
+                WildSpawnType.sectantPriest,
+                WildSpawnType.sectantOni,
+                WildSpawnType.sectantPrizrak,
+                WildSpawnType.sectantPredvestnik,
+                WildSpawnType.bossZryachiy,
+                WildSpawnType.followerZryachiy,
+                WildSpawnType.peacefullZryachiyEvent,
+                WildSpawnType.ravangeZryachiyEvent,
+                WildSpawnType.sectactPriestEvent
+            }
+        };
+
+        Factions.Add(cultists.Name, cultists);
+
+        var infected = new Faction
+        {
+            Name = "infected",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.infectedAssault,
+                WildSpawnType.infectedCivil,
+                WildSpawnType.infectedLaborant,
+                WildSpawnType.infectedPmc,
+                WildSpawnType.infectedTagilla
+            }
+        };
+
+        Factions.Add(infected.Name, infected);
+
+        var usec = new Faction
+        {
+            Name = "usec",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.pmcUSEC
+            }
+        };
+
+        Factions.Add(usec.Name, usec);
+
+        var bear = new Faction
+        {
+            Name = "bear",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.pmcBEAR
+            }
+        };
+
+        Factions.Add(bear.Name, bear);
+
+        var pmcs = new Faction
+        {
+            Name = "pmcs",
+            SubFactions = new List<Faction>
+            {
+                usec,
+                bear
+            }
+        };
+
+        Factions.Add(pmcs.Name, pmcs);
+
+        var killaTagilla = new Faction
+        {
+            Name = "killaTagilla",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossKilla,
+                WildSpawnType.bossTagilla,
+                WildSpawnType.followerTagilla,
+                WildSpawnType.bossTagillaAgro,
+                WildSpawnType.tagillaHelperAgro,
+                WildSpawnType.bossKillaAgro
+            }
+        };
+
+        Factions.Add(killaTagilla.Name, killaTagilla);
+
+        var kabanKolontay = new Faction
+        {
+            Name = "kabanKolontay",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossBoar,
+                WildSpawnType.bossBoarSniper,
+                WildSpawnType.followerBoar,
+                WildSpawnType.followerBoarClose1,
+                WildSpawnType.followerBoarClose2,
+                WildSpawnType.bossKolontay,
+                WildSpawnType.followerKolontayAssault,
+                WildSpawnType.followerKolontaySecurity
+            }
+        };
+
+        Factions.Add(kabanKolontay.Name, kabanKolontay);
+
+        var reshala = new Faction
+        {
+            Name = "reshala",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossBully,
+                WildSpawnType.followerBully
+            }
+        };
+
+        Factions.Add(reshala.Name, reshala);
+
+        var shturman = new Faction
+        {
+            Name = "shturman",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossKojaniy,
+                WildSpawnType.followerKojaniy
+            }
+        };
+
+        Factions.Add(shturman.Name, shturman);
+
+        var gluhar = new Faction
+        {
+            Name = "gluhar",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossGluhar,
+                WildSpawnType.followerGluharAssault,
+                WildSpawnType.followerGluharSnipe,
+                WildSpawnType.followerGluharSecurity,
+                WildSpawnType.followerGluharScout
+            }
+        };
+
+        Factions.Add(gluhar.Name, gluhar);
+
+        var sanitar = new Faction
+        {
+            Name = "sanitar",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossSanitar,
+                WildSpawnType.followerSanitar
+            }
+        };
+
+        Factions.Add(sanitar.Name, sanitar);
+
+        var partisan = new Faction
+        {
+            Name = "partisan",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.bossPartisan
+            }
+        };
+
+        Factions.Add(partisan.Name, partisan);
+
+        var misc = new Faction
+        {
+            Name = "misc",
+            BotTypes = new List<WildSpawnType>
+            {
+                WildSpawnType.shooterBTR,
+                WildSpawnType.gifter
+            }
+        };
+
+        Factions.Add(misc.Name, misc);
+
+        var scavbosses = new Faction
+        {
+            Name = "scavbosses",
+            SubFactions = new List<Faction>
+            {
+                killaTagilla,
+                kabanKolontay,
+                reshala,
+                shturman,
+                gluhar,
+                sanitar
+            }
+        };
+
+        Factions.Add(scavbosses.Name, scavbosses);
+
+        var criminals = new Faction
+        {
+            Name = "criminals",
+            SubFactions = new List<Faction>
+            {
+                scavs,
+                scavbosses
+            }
+        };
+
+        Factions.Add(criminals.Name, criminals);
+
+        var savage = new Faction
+        {
+            Name = "savage",
+            SubFactions = new List<Faction>
+            {
+                scavs,
+                scavbosses,
+                smugglers,
+                bloodhounds,
+                raiders
+            }
+        };
+
+        Factions.Add(savage.Name, savage);
+    }
+}

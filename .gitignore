@@ -1,0 +1,43 @@
+# Build outputs
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.mdb
+
+# Unity / BepInEx
+*.bundle
+*.asset
+*.unity
+*.prefab
+
+# IDE
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+*.DotSettings.user
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# NuGet
+packages/
+*.nupkg
+
+# Logs
+*.log
+LogOutput/
+
+# References (EFT DLLs — not redistributable)
+**/References/*.dll
+!**/References/*.xml
+
+# Agent transcripts
+agent-transcripts/
+mcps/

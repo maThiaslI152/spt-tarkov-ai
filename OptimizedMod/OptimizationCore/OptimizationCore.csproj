@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <RootNamespace>OptimizationCore</RootNamespace>
+    <AssemblyName>OptimizationCore</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Configurations>Debug;Release</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.*" />
+    <PackageReference Include="UnityEngine.Modules" Version="2022.3.43" IncludeAssets="compile" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../SAIN/References/hollowed.dll</HintPath>
+    </Reference>
+    <Reference Include="Comfort">
+      <HintPath>../SAIN/References/Comfort.dll</HintPath>
+    </Reference>
+    <Reference Include="Comfort.Unity">
+      <HintPath>../SAIN/References/Comfort.Unity.dll</HintPath>
+    </Reference>
+    <Reference Include="CommonExtensions" HintPath="../SAIN/References/CommonExtensions.dll" Private="false" />
+    <Reference Include="DissonanceVoip" HintPath="../SAIN/References/DissonanceVoip.dll" Private="false" />
+    <Reference Include="Newtonsoft.Json" HintPath="../SAIN/References/Newtonsoft.Json.dll" Private="false" />
+  </ItemGroup>
+</Project>
