@@ -34,6 +34,8 @@
     <Compile Remove="Interop\**\*.cs" />
     <Compile Remove="Extensions\**\*.cs" />
     <Compile Remove="SAINServerMod\**\*.cs" />
+    <Compile Remove="SAIN\obj\**\*.cs" />
+    <Compile Remove="SAIN\bin\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
