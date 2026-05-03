@@ -1,13 +1,19 @@
-﻿using EFT;
+using EFT;
 using SAIN.Extensions;
 using SAIN.Layers.Combat.Solo.Cover;
 using SAIN.Models.Enums;
 
 namespace SAIN.Layers.Combat.Solo;
 
-internal class CombatSoloLayer(BotOwner bot, int priority) : SAINLayer(bot, priority, Name, ESAINLayer.Combat)
+internal class CombatSoloLayer : SAINLayer
 {
     public static readonly string Name = BuildLayerName("Combat Layer");
+
+    public CombatSoloLayer(BotOwner bot, int priority)
+        : base(bot, priority, Name, ESAINLayer.Combat)
+    {
+        IsActiveCheckInterval = 1f / 30f;
+    }
 
     public override Action GetNextAction()
     {
@@ -73,11 +79,13 @@ internal class CombatSoloLayer(BotOwner bot, int priority) : SAINLayer(bot, prio
     {
         if (!BotOwner.IsBotActive())
         {
+            ResetIsActiveEvaluationCache();
             CheckActiveChanged(false);
             return false;
         }
 
-        bool active = GetBotComponent() && _currentDecision != ECombatDecision.None;
+        bool active = CheckIsActiveWithCache(() =>
+            GetBotComponent() && _currentDecision != ECombatDecision.None);
         CheckActiveChanged(active);
         return active;
     }

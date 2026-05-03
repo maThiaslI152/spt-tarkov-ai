@@ -1,4 +1,4 @@
-﻿using EFT;
+using EFT;
 using SAIN.Components;
 using SAIN.Extensions;
 using SAIN.Layers.Combat.Solo;
@@ -25,6 +25,12 @@ internal class CombatSquadLayer(BotOwner botOwner, int priority) : SAINLayer(bot
             case ESquadDecision.Search:
                 return new Action(typeof(SearchAction), $"{LastActionDecision}");
 
+            case ESquadDecision.SpreadOut:
+                return new Action(typeof(SearchAction), $"{LastActionDecision}");
+
+            case ESquadDecision.HoldPositions:
+                return new Action(typeof(RegroupAction), $"{LastActionDecision}");
+
             case ESquadDecision.GroupSearch:
                 if (Bot.Squad.IAmLeader)
                 {
@@ -37,6 +43,10 @@ internal class CombatSquadLayer(BotOwner botOwner, int priority) : SAINLayer(bot
 
             case ESquadDecision.PushSuppressedEnemy:
                 return new Action(typeof(RushEnemyAction), $"{LastActionDecision}");
+
+            case ESquadDecision.BoundingRetreat:
+            case ESquadDecision.Retreat:
+                return new Action(typeof(RegroupAction), $"{LastActionDecision}");
 
             default:
                 return new Action(typeof(RegroupAction), $"DEFAULT!");
@@ -59,10 +69,14 @@ internal class CombatSquadLayer(BotOwner botOwner, int priority) : SAINLayer(bot
                 SAINDecisionClass decisions = bot.Decision;
                 if (
                     decisions.CurrentSelfDecision == ESelfActionType.None
-                    && decisions.CurrentCombatDecision != ECombatDecision.DogFight
+                    && decisions.CurrentCombatDecision == ECombatDecision.None
                     && decisions.CurrentSquadDecision != ESquadDecision.None
                 )
                 {
+                    if (bot.Squad.IAmLeader)
+                    {
+                        SquadCombatCoordinator.CoordinateSquad(bot, decisions);
+                    }
                     CheckActiveChanged(true);
                     return true;
                 }

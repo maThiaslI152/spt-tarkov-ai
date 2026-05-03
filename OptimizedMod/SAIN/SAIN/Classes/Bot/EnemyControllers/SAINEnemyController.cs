@@ -272,13 +272,27 @@ public class SAINEnemyController : BotComponentClassBase
     {
         if (KnownEnemies.Count == 0)
         {
-            ClearEnemy();
+            // DecisionManager ticks before EnemyController.checkDiscrepency in some frames.
+            // Previously we cleared SAIN + EFT goal here, wiping vanilla GoalEnemy before sync could run.
+            TryIngestGoalEnemyFromEftMemory();
+            if (KnownEnemies.Count == 0)
+            {
+                TryIngestUnderFireEnemy();
+            }
+            if (KnownEnemies.Count == 0)
+            {
+                ClearEnemy();
+            }
+            else
+            {
+                GoalEnemy = SelectEnemy();
+                setGoalEnemy(GoalEnemy?.EnemyInfo);
+            }
+            return GoalEnemy;
         }
-        else
-        {
-            GoalEnemy = SelectEnemy();
-            setGoalEnemy(GoalEnemy?.EnemyInfo);
-        }
+
+        GoalEnemy = SelectEnemy();
+        setGoalEnemy(GoalEnemy?.EnemyInfo);
         return GoalEnemy;
     }
 
@@ -494,37 +508,70 @@ public class SAINEnemyController : BotComponentClassBase
 
     private void checkDiscrepency()
     {
-        EnemyInfo goalEnemy = BotOwner.Memory.GoalEnemy;
-        if (goalEnemy != null && GoalEnemy == null)
+        if (GoalEnemy != null)
         {
-            //if (_nextLogTime < Time.time)
-            //{
-            //_nextLogTime = Time.time + 1f;
-
-            //Logger.LogError("Bot's Goal Enemy is not null, but SAIN enemy is null.");
-            if (goalEnemy.Person == null)
-            {
-                //Logger.LogError("Bot's Goal Enemy Person is null");
-                return;
-            }
-            if (goalEnemy.ProfileId == Bot.ProfileId)
-            {
-                //Logger.LogError("goalEnemy.ProfileId == SAINBot.ProfileId");
-                return;
-            }
-            if (goalEnemy.ProfileId == Bot.Player.ProfileId)
-            {
-                //Logger.LogError("goalEnemy.ProfileId == SAINBot.Player.ProfileId");
-                return;
-            }
-            if (goalEnemy.ProfileId == Bot.BotOwner.ProfileId)
-            {
-                //Logger.LogError("goalEnemy.ProfileId == SAINBot.Player.ProfileId");
-                return;
-            }
-            Bot.EnemyController.CheckAddEnemy(goalEnemy.Person);
-            //}
+            return;
         }
+
+        TryIngestGoalEnemyFromEftMemory();
+    }
+
+    /// <summary>
+    /// If EFT memory has a goal enemy but SAIN has no matching entry yet, add it (same guards as legacy checkDiscrepency).
+    /// </summary>
+    private void TryIngestGoalEnemyFromEftMemory()
+    {
+        EnemyInfo goalEnemy = BotOwner?.Memory?.GoalEnemy;
+        if (goalEnemy == null)
+        {
+            return;
+        }
+
+        if (goalEnemy.Person == null)
+        {
+            return;
+        }
+
+        if (goalEnemy.ProfileId == Bot.ProfileId)
+        {
+            return;
+        }
+
+        if (goalEnemy.ProfileId == Bot.Player.ProfileId)
+        {
+            return;
+        }
+
+        if (goalEnemy.ProfileId == Bot.BotOwner.ProfileId)
+        {
+            return;
+        }
+
+        CheckAddEnemy(goalEnemy.Person);
+    }
+
+    /// <summary>
+    /// When under fire but KnownEnemies is empty, re-attach the last shooter from SAIN memory if still valid.
+    /// </summary>
+    private void TryIngestUnderFireEnemy()
+    {
+        if (BotOwner?.Memory == null || !BotOwner.Memory.IsUnderFire)
+        {
+            return;
+        }
+
+        Enemy last = Bot.Memory?.LastUnderFireEnemy;
+        if (last?.EnemyPlayer == null)
+        {
+            return;
+        }
+
+        if (!Enemy.IsEnemyActive(last))
+        {
+            return;
+        }
+
+        CheckAddEnemy(last.EnemyPlayer);
     }
 
     private Enemy _goalEnemy;

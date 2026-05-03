@@ -24,11 +24,13 @@ internal class ExtractLayer : SAINLayer
     {
         if (!BotOwner.IsBotActive())
         {
+            ResetIsActiveEvaluationCache();
             CheckActiveChanged(false);
             return false;
         }
 
-        bool active = GetBotComponent() && allowedToExtract() && hasExtractReason() && hasExtractLocation();
+        bool active = CheckIsActiveWithCache(() =>
+            GetBotComponent() && allowedToExtract() && hasExtractReason() && hasExtractLocation());
         CheckActiveChanged(active);
         return active;
     }

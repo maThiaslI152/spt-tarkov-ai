@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using EFT;
+using LootingBots;
 using SAIN.Components;
 using SAIN.Models.Enums;
+using SAIN.Plugin;
+using SAIN.Preset.GlobalSettings;
 using SAIN.SAINComponent.Classes.EnemyClasses;
 using UnityEngine;
 
@@ -16,7 +19,13 @@ namespace SAIN.Layers.Combat.Squad;
 public static class SquadCombatCoordinator
 {
     private const float CoordinatorUpdateInterval = 0.5f; // Run coordination every 500ms
-    private static readonly Dictionary<string, float> LastCoordinationTime = new();
+    private static readonly Dictionary<string, SquadCoordState> SquadStates = new();
+
+    /// <summary>Clears per-squad throttle state — call on raid / GameWorld teardown so IDs and memory do not leak across sessions.</summary>
+    public static void ResetCoordinationThrottle()
+    {
+        SquadStates.Clear();
+    }
 
     /// <summary>
     /// Coordinate squad combat: distribute targets, assign flanks, coordinate suppression.
@@ -31,23 +40,65 @@ public static class SquadCombatCoordinator
         if (squad == null || squad.Members.Count <= 1)
             return;
 
-        // Throttle coordination
-        if (LastCoordinationTime.TryGetValue(squad.Id, out float lastTime) &&
-            Time.time - lastTime < CoordinatorUpdateInterval)
-            return;
+        var state = GetState(squad.Id);
 
-        LastCoordinationTime[squad.Id] = Time.time;
+        // Throttle coordination
+        if (Time.time - state.LastCoordinationTime < CoordinatorUpdateInterval)
+            return;
+        state.LastCoordinationTime = Time.time;
+
+        RogueBaseDefenseSettings settings = SAINPlugin.LoadedPreset?.GlobalSettings?.General?.RogueBaseDefense;
+        bool rogueDefense = IsRogueDefenseContext(leader, settings);
+
+        if (state.OrderExpireTime > 0f && Time.time >= state.OrderExpireTime)
+        {
+            ClearSquadOrders(squad, state, "ttl-expired");
+        }
 
         // Collect all enemies visible to any squad member
         var allEnemies = CollectAllVisibleEnemies(squad);
+
+        if (rogueDefense)
+        {
+            BotComponent electedLeader = ElectRogueLeader(squad, state, settings, allEnemies);
+            if (electedLeader == null)
+            {
+                return;
+            }
+
+            if (state.LeaderProfileId != electedLeader.ProfileId)
+            {
+                ClearSquadOrders(squad, state, "leader-changed");
+                state.LeaderProfileId = electedLeader.ProfileId;
+                state.LeaderHoldUntil = Time.time + settings.RogueLeaderHoldSeconds;
+                LogDiag($"[SAIN DIAG][RogueCoord] Squad={squad.Id} elected leader={electedLeader.name}");
+            }
+
+            if (settings.DisableRogueLootingOnBase)
+            {
+                SuppressRogueLooting(squad, state, settings);
+            }
+
+            if (allEnemies.Count == 0)
+            {
+                ApplyRogueDefenseOrders(squad, electedLeader, state, settings);
+                return;
+            }
+
+            // Distribute targets and flanking around elected leader
+            DistributeTargets(squad, allEnemies, electedLeader, state, settings);
+            AssignFlankingPositions(squad, allEnemies, electedLeader, state, settings);
+            return;
+        }
+
         if (allEnemies.Count == 0)
             return;
 
         // Distribute targets to squad members
-        DistributeTargets(squad, allEnemies);
+        DistributeTargets(squad, allEnemies, leader, state, null);
 
         // Assign flanking positions
-        AssignFlankingPositions(squad, allEnemies);
+        AssignFlankingPositions(squad, allEnemies, leader, state, null);
     }
 
     /// <summary>
@@ -79,7 +130,13 @@ public static class SquadCombatCoordinator
     /// Distribute targets across squad members to avoid everyone shooting the same target.
     /// Each member gets assigned a primary target based on proximity and threat.
     /// </summary>
-    private static void DistributeTargets(SAIN.BotController.Classes.Squad squad, List<Enemy> allEnemies)
+    private static void DistributeTargets(
+        SAIN.BotController.Classes.Squad squad,
+        List<Enemy> allEnemies,
+        BotComponent electedLeader,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings
+    )
     {
         if (allEnemies.Count == 0 || squad.Members.Count == 0)
             return;
@@ -87,6 +144,11 @@ public static class SquadCombatCoordinator
         foreach (var member in squad.Members.Values)
         {
             if (member == null || !member.BotActive || member.IsDead)
+                continue;
+
+            // Do not call SetSquadDecision — it clears solo combat to None and lets squad layer outrank solo.
+            // Preserve EnemyDecisions output while this bot already has an active combat decision.
+            if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
                 continue;
 
             // Find the closest enemy to this member
@@ -106,18 +168,30 @@ public static class SquadCombatCoordinator
             // Set the squad decision based on distributed target
             if (closest != null)
             {
+                ESquadDecision squadDecision = ESquadDecision.None;
                 // Suppress if enemy is within effective range but behind cover
                 if (closestDist < 1600f && !closest.IsVisible) // ~40m
                 {
-                    member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.Suppress);
+                    squadDecision = ESquadDecision.Suppress;
                 }
                 else if (closestDist < 400f) // ~20m — close quarters
                 {
-                    member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.PushSuppressedEnemy);
+                    squadDecision = ESquadDecision.PushSuppressedEnemy;
                 }
                 else if (closestDist > 6400f) // ~80m — spread out and search
                 {
-                    member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.Search);
+                    squadDecision = ESquadDecision.Search;
+                }
+                else
+                {
+                    squadDecision = ESquadDecision.Suppress;
+                }
+
+                if (squadDecision != ESquadDecision.None)
+                {
+                    member.Decision.DecisionManager.SetSquadDecision(squadDecision);
+                    state.LastOrder = squadDecision;
+                    state.OrderExpireTime = Time.time + (settings?.RogueOrderTtlSeconds ?? 4f);
                 }
             }
         }
@@ -126,7 +200,13 @@ public static class SquadCombatCoordinator
     /// <summary>
     /// Assign flanking positions to squad members around the enemy centroid.
     /// </summary>
-    private static void AssignFlankingPositions(SAIN.BotController.Classes.Squad squad, List<Enemy> allEnemies)
+    private static void AssignFlankingPositions(
+        SAIN.BotController.Classes.Squad squad,
+        List<Enemy> allEnemies,
+        BotComponent electedLeader,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings
+    )
     {
         if (allEnemies.Count == 0 || squad.Members.Count < 2)
             return;
@@ -159,11 +239,228 @@ public static class SquadCombatCoordinator
             for (int i = 1; i < sortedMembers.Count; i++)
             {
                 var member = sortedMembers[i];
+                if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
+                    continue;
                 if (member.HasEnemy && member.GoalEnemy != null)
                 {
                     member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.Search);
+                    state.LastOrder = ESquadDecision.Search;
+                    state.OrderExpireTime = Time.time + (settings?.RogueOrderTtlSeconds ?? 4f);
                 }
             }
         }
+    }
+
+    private static void ApplyRogueDefenseOrders(
+        SAIN.BotController.Classes.Squad squad,
+        BotComponent electedLeader,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings
+    )
+    {
+        ESquadDecision leaderOrder = ESquadDecision.Search; // Patrol
+        foreach (var member in squad.Members.Values)
+        {
+            if (!IsRogueMemberEligible(member))
+            {
+                continue;
+            }
+            if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
+            {
+                continue;
+            }
+
+            ESquadDecision order;
+            if (member.ProfileId == electedLeader.ProfileId)
+            {
+                order = leaderOrder;
+            }
+            else
+            {
+                float distFromLeader = (member.Position - electedLeader.Position).sqrMagnitude;
+                order = distFromLeader > 20f * 20f ? ESquadDecision.Regroup : ESquadDecision.Search;
+            }
+
+            member.Decision.DecisionManager.SetSquadDecision(order);
+            state.LastOrder = order;
+            state.OrderExpireTime = Time.time + settings.RogueOrderTtlSeconds;
+        }
+    }
+
+    private static BotComponent ElectRogueLeader(
+        SAIN.BotController.Classes.Squad squad,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings,
+        List<Enemy> allEnemies
+    )
+    {
+        if (state.LeaderProfileId != null
+            && Time.time < state.LeaderHoldUntil
+            && squad.Members.TryGetValue(state.LeaderProfileId, out BotComponent heldLeader)
+            && IsRogueMemberEligible(heldLeader))
+        {
+            return heldLeader;
+        }
+
+        Vector3 squadCenter = Vector3.zero;
+        int count = 0;
+        foreach (BotComponent member in squad.Members.Values)
+        {
+            if (!IsRogueMemberEligible(member))
+            {
+                continue;
+            }
+            squadCenter += member.Position;
+            count++;
+        }
+        if (count == 0)
+        {
+            return null;
+        }
+        squadCenter /= count;
+
+        BotComponent best = null;
+        float bestScore = float.MinValue;
+        foreach (BotComponent member in squad.Members.Values)
+        {
+            if (!IsRogueMemberEligible(member))
+            {
+                continue;
+            }
+
+            float score = ScoreRogueLeader(member, squadCenter);
+            if (score > bestScore
+                || (Mathf.Abs(score - bestScore) < 0.001f
+                    && string.CompareOrdinal(member.ProfileId, best?.ProfileId) < 0))
+            {
+                bestScore = score;
+                best = member;
+            }
+        }
+
+        return best;
+    }
+
+    private static float ScoreRogueLeader(BotComponent member, Vector3 squadCenter)
+    {
+        float score = 0f;
+        if (member.EnemyController.HumanEnemyInLineofSight)
+        {
+            score += 10f;
+        }
+        if (member.EnemyController.ActiveHumanEnemy)
+        {
+            score += 5f;
+        }
+        if (member.GoalEnemy != null)
+        {
+            score += 4f;
+        }
+        if (member.Decision.CurrentSelfDecision == ESelfActionType.None)
+        {
+            score += 2f;
+        }
+
+        float centerDist = (member.Position - squadCenter).sqrMagnitude;
+        score += Mathf.Clamp01(1f - centerDist / (40f * 40f)) * 3f;
+        return score;
+    }
+
+    private static bool IsRogueDefenseContext(BotComponent leader, RogueBaseDefenseSettings settings)
+    {
+        if (settings == null || !settings.EnableRogueBaseDefensePolicy)
+        {
+            return false;
+        }
+        if (leader?.Info?.Profile?.WildSpawnType != WildSpawnType.exUsec)
+        {
+            return false;
+        }
+        if (!settings.OnlyOnLighthouse)
+        {
+            return true;
+        }
+
+        string locationId = GameWorldComponent.Instance?.GameWorld?.LocationId;
+        return !string.IsNullOrEmpty(locationId)
+            && locationId.IndexOf("lighthouse", System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsRogueMemberEligible(BotComponent member)
+    {
+        return member != null
+            && member.BotActive
+            && !member.IsDead
+            && member.Info?.Profile?.WildSpawnType == WildSpawnType.exUsec;
+    }
+
+    private static SquadCoordState GetState(string squadId)
+    {
+        if (!SquadStates.TryGetValue(squadId, out SquadCoordState state))
+        {
+            state = new SquadCoordState();
+            SquadStates[squadId] = state;
+        }
+        return state;
+    }
+
+    private static void SuppressRogueLooting(
+        SAIN.BotController.Classes.Squad squad,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings
+    )
+    {
+        if (!ModDetection.LootingBotsLoaded)
+        {
+            return;
+        }
+        if (Time.time - state.LastLootSuppressTime < 2f)
+        {
+            return;
+        }
+        state.LastLootSuppressTime = Time.time;
+
+        foreach (BotComponent member in squad.Members.Values)
+        {
+            if (!IsRogueMemberEligible(member))
+            {
+                continue;
+            }
+            LootingBotsInterop.TryPreventBotFromLooting(member.BotOwner, settings.RogueOrderTtlSeconds);
+        }
+    }
+
+    private static void ClearSquadOrders(SAIN.BotController.Classes.Squad squad, SquadCoordState state, string reason)
+    {
+        foreach (var member in squad.Members.Values)
+        {
+            if (member == null || member.IsDead || !member.BotActive)
+            {
+                continue;
+            }
+            member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.None);
+        }
+
+        state.LastOrder = ESquadDecision.None;
+        state.OrderExpireTime = 0f;
+        LogDiag($"[SAIN DIAG][RogueCoord] Squad={squad.Id} cleared orders ({reason})");
+    }
+
+    private static void LogDiag(string message)
+    {
+        if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+        {
+            Logger.LogInfo(message);
+        }
+    }
+
+    private sealed class SquadCoordState
+    {
+        public float LastCoordinationTime;
+        public string LeaderProfileId;
+        public float LeaderHoldUntil;
+        public ESquadDecision LastOrder = ESquadDecision.None;
+        public float OrderExpireTime;
+        public float LastLootSuppressTime;
     }
 }

@@ -50,7 +50,8 @@
 │(Combat)  │   │  (Looting)   │           │
 │          │   │              │           │
 │Priority: │   │Priority:     │           │
-│ 60-99    │   │ 4-13         │           │
+│ 60-99    │   │ ~62 default  │           │
+│(SAIN)    │   │(configurable)│           │
 │          │   │              │           │
 └──────────┘   └──────────────┘           │
                                           │
@@ -64,8 +65,8 @@ The relationship is a **stack with priority-based arbitration**:
 1. **SPT Core** provides the base game: `BotOwner`, brains (`AICoreLayerClass`), navmesh, physics
 2. **BigBrain** patches into the brain system and provides the `BrainManager` API + `CustomLayer`/`CustomLogic` base classes
 3. **Waypoints** provides expanded navmesh data for bot pathfinding
-4. **SAIN** consumes BigBrain's API to register combat layers at priorities 60-99
-5. **LootingBots** consumes BigBrain's API to register looting layers at priorities 4-13
+4. **SAIN** consumes BigBrain's API to register combat layers at priorities 60–99 (see BigBrainHandler registrations).
+5. **LootingBots** registers its loot/peace layer at a **configurable** numeric priority (`BigBrainLootLayerPriority`, **default 62** in this fork) so loot/peace sits above BotMind-style layers (~50) while **SAIN combat and extract layers stay higher** (~65 extract, ~69–70 combat — tune via configs).
 6. **Infrastructure mods** operate below or alongside behavior mods:
   - **AILimit**: Unity-level bot deactivation via `GameObject.SetActive(false)` (below BigBrain, below NavMesh)
   - **ABPS**: Client-side spawn caps, despawn mechanics, boss chance tuning (spawn system level)
@@ -73,9 +74,10 @@ The relationship is a **stack with priority-based arbitration**:
 
 **Layer priority determines behavior precedence:**
 
-- SAIN combat layers (60-99) always override LootingBots (4-13)
-- When a bot enters combat, SAIN takes control and LootingBots yields
-- When peaceful, LootingBots runs loot scans and SAIN's combat layers are inactive
+BigBrain picks the **highest-priority** layer whose `IsActive()` is true. It is not a hard-coded mod order — numeric priority decides.
+
+- With typical defaults in this fork (loot layer ~62, SAIN combat higher), **combat SAIN layers win when active**, and LootingBots drives loot/peace when SAIN combat/extract layers are inactive.
+- If LootingBots priority were raised above SAIN combat, loot could theoretically win while both report active — **avoid that** by keeping loot below combat priorities or disabling conflicting layers.
 
 ---
 
@@ -263,6 +265,39 @@ knight fight layers, etc.).
    │     → Action.Update() runs SAIN's behavior logic
 ```
 
+### QuestingBots (third-party) — SAIN combat must beat quest layer
+
+When **SPT QuestingBots** is installed ([docs/SPTQuestingBots.md](SPTQuestingBots.md)), it registers additional BigBrain layers and reads **`brain_layer_priorities`** from QB config. Arbitration is **numeric priority among layers whose `IsActive()` is true** — there is no central if/else tree across mods.
+
+**Rule:** For brains used by questing bots, **SAIN combat layer priorities** from preset [`LayerSettings`](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs) (**`SAINCombatSquadLayerPriority`** / **`SAINCombatSoloLayerPriority`**, typically **70** / **69**) must be **strictly greater than** QuestingBots’ quest / navigation layer priorities. Otherwise bots can remain on **quest movement** while SAIN has already removed vanilla assault layers, yielding “walk to objective, don’t shoot.”
+
+**Also use:** QB **hearing sensor** and **post-combat search/suspend cooldown** settings (`HearingSensorConfig`, `SearchTimeAfterCombatConfig`) so quest layers drop **`IsActive`** quickly under contact and do not resume too early. **SAINInterop `CanBotQuest`** ([`SAINExternal`](../OptimizedMod/SAIN/SAIN/Interop/SAINExternal.cs)) now applies conservative QuestingBots-only combat gating from SAIN enemy-controller signals while preserving non-QB behavior. Performance CSV alone may show **low AI ms utilization** while this mis-ordering persists ([AI_BUDGET_LOD_PLAN.md](AI_BUDGET_LOD_PLAN.md)).
+
+#### Known issue / validation pending
+
+- **Status:** code-side fix is merged and build-verified; full in-raid validation is still pending.
+- **Symptom pattern:** bots keep quest/navigation movement while local combat signals exist, often with low budget exhaustion in CSV.
+- **Primary debug path:** enable F12 SAIN `Diagnostic Logging` and inspect `[SAIN DIAG][BigBrain]` lines (active layer + SAIN combat signals).
+- **Reference:** [BUGFIX-BigBrainPriority-QuestingBots.md](BUGFIX-BigBrainPriority-QuestingBots.md)
+
+### Rogue (`ExUsec`) base-defense policy (SAIN + LootingBots interop)
+
+Rogues can now run a Rogue-only squad-defense policy in SAIN coordinator logic:
+
+- **Leader election:** score-based with hysteresis and deterministic tie-break.
+- **Order lifecycle:** squad orders use TTL and are canceled on leader switch/enemy loss.
+- **Defense posture:** out of contact, squad favors patrol/hold-style decisions instead of drifting to loot behavior.
+- **Loot suppression:** when LootingBots is present, SAIN coordinator calls LB interop `TryPreventBotFromLooting` for Rogue members in scope.
+- **Scope guard:** default scope is Lighthouse-only Rogue context; policy can be disabled or broadened through preset settings.
+
+Configuration lives in SAIN preset under `General -> Rogue Base Defense`:
+
+- `EnableRogueBaseDefensePolicy`
+- `DisableRogueLootingOnBase`
+- `OnlyOnLighthouse`
+- `RogueLeaderHoldSeconds`
+- `RogueOrderTtlSeconds`
+
 ### Layer-Level Integration
 
 SAIN layers integrate at **three distinct interfaces** of BigBrain:
@@ -417,13 +452,12 @@ When multiple BigBrain layers want to be active, they're checked in **priority o
 | ~65      | ExtractLayer         | SAIN            | Bot wants to extract                       |
 | ~60-70   | CombatSquadLayer     | SAIN            | Squad combat                               |
 | ~60-70   | CombatSoloLayer      | SAIN            | Solo combat                                |
-| **5**    | **LootingLayer**     | **LootingBots** | **PMCs/Rogues peaceful + loot available**  |
-| **4**    | **LootingLayer**     | **LootingBots** | **Scavs/Bosses peaceful + loot available** |
-| 13       | LootingLayer         | LootingBots     | Sectants (cultists loot aggressively)      |
+| **~62**  | **LootingLayer**     | **LootingBots** | **Peaceful + loot available (default in fork; one priority for all brain variants)** |
 
 
-**Result:** During combat, SAIN's layers (60+) always override LootingBots (4-5). Looting only
-occurs when no higher-priority SAIN layer is active.
+**Note:** Older LootingBots builds used multiple fixed priorities (e.g. 4–13) per bot type. This fork uses **`BigBrainLootLayerPriority` (default 62)** for every registered brain — adjust in BepInEx config if you stack other mods.
+
+**Result:** When a SAIN combat or extract layer is active with a **higher** priority than the loot layer, it wins. Loot/peace runs when those layers are inactive (typical defaults) or when priorities are tuned that way.
 
 ### Interop API (Cross-Mod Communication)
 
@@ -456,9 +490,9 @@ if (LootingBotsInterop.IsLootingBotsLoaded())
 
 ### Design Harmony
 
-1. **SAIN handles combat** (priority 60-99): Vision, shooting, cover, squad tactics
-2. **LootingBots handles peace** (priority 4-13): Scanning, navigating, inventory management
-3. **BigBrain arbitrates** via priority: combat always wins
+1. **SAIN handles combat** (priorities ~60–99): Vision, shooting, cover, squad tactics
+2. **LootingBots handles peace / loot** (priority configurable, **default ~62**): Scanning, navigating, inventory management — kept **below** SAIN combat/extract so combat wins when active
+3. **BigBrain arbitrates** by numeric priority: whichever active layer has the highest priority runs
 4. **Both share Waypoints** for NavMesh pathfinding data
 
 ---
@@ -693,7 +727,7 @@ When a new mod is added to this workspace, document its integration here:
 | Force loot scan (interop)    | SAIN              | LootingBots       | `External.ForceBotToScanLoot()`               | On combat exit          |
 | Inventory check (interop)    | SAIN              | LootingBots       | `External.CheckIfInventoryFull()`             | On extract decision     |
 | Net loot value (interop)     | SAIN              | LootingBots       | `External.GetNetLootValue()`                  | On raid end             |
-| Layer priority arbitration   | BigBrain          | SAIN, LootingBots | Layer priority comparison (60+ vs 4-13)       | Per brain tick          |
+| Layer priority arbitration   | BigBrain          | SAIN, LootingBots | Numeric priority (SAIN combat/extract > default loot ~62 unless reconfigured) | Per brain tick          |
 | NavMesh injection            | Waypoints         | EFT Core          | `NavMesh.AddNavMeshData()`                    | Per raid start          |
 | Pathfinding override         | Waypoints         | EFT Core          | `NavMesh.CalculatePath()` in `FindPath` patch | Per path request        |
 | Bot deactivation (distance)  | AILimit           | EFT Core          | `GameObject.SetActive(false)`                 | Every ~300 frames       |
@@ -720,13 +754,13 @@ The order in which mods initialize matters. The current initialization order is:
       - Registers with BotSpawnController for spawn events
    d. Starts global coroutines (Vision, DirectionData, etc.)
 5. LootingBots initializes:
-   a. Registers LootingLayer for all bot types (priorities 4-13)
+   a. Registers LootingLayer for all bot types (`BigBrainLootLayerPriority`, default **62**)
    b. Removes vanilla "Utility peace" and "LootPatrol" layers
    c. Initializes ItemAppraiser (async price fetching)
 6. Raid begins → bots spawn:
    a. SAIN creates BotComponent per bot (combat AI)
    b. LootingBots creates LootingBrain + LootFinder per bot (looting AI)
-   c. BigBrain manages layer priority: SAIN (60+) always wins over LootingBots (4-13)
+   c. BigBrain picks the winning layer by **priority when multiple layers are active** — with fork defaults, SAIN combat/extract stays above LootingBots loot/peace
 7. SPT-Waypoints initializes:
    a. Injects custom NavMesh per map (replaces Unity NavMesh data)
    b. Patches pathfinding with more reliable NavMesh.CalculatePath()

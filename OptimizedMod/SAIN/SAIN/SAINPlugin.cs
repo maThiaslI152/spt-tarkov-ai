@@ -301,8 +301,13 @@ public class SAINPlugin : BaseUnityPlugin
         {
             _perfSyncTimer = 0f;
             PerfMonFPS.Value = $"{mon.CurrentFPS:F0} FPS / {mon.AvgFrameTimeMs:F1}ms avg";
-            PerfMonBudget.Value = $"{mon.BudgetUsedMs:F2}/{mon.BudgetLimitMs:F1}ms ({mon.BudgetUtilizationPercent:F0}%) exh={mon.BudgetExhaustedRate:F0}%";
-            PerfMonBots.Value = $"V:{mon.VisibleBots} A:{mon.AudibleBots} O:{mon.OccludedBots} Off:{mon.OfflineSquadCount}";
+            float headroomMs = Mathf.Max(0f, mon.BudgetLimitMs - mon.BudgetUsedMs);
+            PerfMonBudget.Value =
+                $"{mon.BudgetUsedMs:F2}/{mon.BudgetLimitMs:F1}ms ({mon.BudgetUtilizationPercent:F0}%) " +
+                $"head:{headroomMs:F2}ms now:{(mon.BudgetExhaustedThisFrame ? "Y" : "N")} exh:{mon.BudgetExhaustedRate:F0}%";
+            PerfMonBots.Value =
+                $"Proc:{mon.BotsProcessedThisFrame} Skip:{mon.BotsSkippedThisFrame} " +
+                $"V:{mon.VisibleBots} A:{mon.AudibleBots} O:{mon.OccludedBots} Off:{mon.OfflineSquadCount}";
             PerfMonCSVPath.Value = mon.LogToCSV ? "BepInEx/LogOutput/sain_perf.csv" : "(disabled)";
         }
     }

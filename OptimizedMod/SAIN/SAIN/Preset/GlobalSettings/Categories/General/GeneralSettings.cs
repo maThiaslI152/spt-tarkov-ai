@@ -40,6 +40,10 @@ public class GeneralSettings : SAINSettingsBase<GeneralSettings>, ISAINSettings
     [Description("Modify settings that relate to Looting Bots. Requires Looting Bots to be installed.")]
     public LootingBotsSettings LootingBots = new();
 
+    [Name("Rogue Base Defense")]
+    [Description("Settings for ExUsec coordination and no-loot policy in base-defense contexts.")]
+    public RogueBaseDefenseSettings RogueBaseDefense = new();
+
     public JokeSettings Jokes = new();
 
     public DebugSettings Debug = new();
@@ -58,6 +62,7 @@ public class GeneralSettings : SAINSettingsBase<GeneralSettings>, ISAINSettings
         list.Add(Extract);
         list.Add(Flashlight);
         list.Add(LootingBots);
+        list.Add(RogueBaseDefense);
         list.Add(Jokes);
         list.Add(Layers);
         Debug.Init(list);

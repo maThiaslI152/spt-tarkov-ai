@@ -1,6 +1,6 @@
 ---
 name: SAIN-optimization-fix-plan
-overview: Merge root-level duplicate/optimized files into SAIN\SAIN\ source tree, move new optimization files into SAIN\SAIN\, add PerceptionTier-based performance scaling, fix the build configuration so root SAIN.csproj compiles the SAIN\SAIN\ source tree, and delete stale root duplicates.
+overview: Historical plan — much of this merged into `SAIN\SAIN\`. Root `OptimizedMod\SAIN\SAIN.csproj` already compiles inner sources via selective `<Compile Remove>`. Duplicate `Layers\` at mod root was removed; agents should verify docs vs `SAIN\SAIN\` only.
 todos:
   - id: a1-perception-tier-enum
     content: Add PerceptionTier enum to SAIN\SAIN\SAINEnum.cs
@@ -30,8 +30,8 @@ todos:
     content: "Move BotPoolPatches.cs into SAIN\SAIN\Patches\ (no code changes, document global Object.Destroy hook risk)"
     status: pending
   - id: c1-csproj-fix
-    content: "Fix root SAIN.csproj: remove Compile Remove exclusion so SAIN\SAIN\ source is compiled"
-    status: pending
+    content: "Root SAIN.csproj already compiles SAIN\\SAIN\\ via SDK glob + selective Compile Remove — verify when adding files under excluded paths (Layers/, Components/, etc.)"
+    status: completed
 isProject: false
 ---
 
@@ -43,10 +43,10 @@ The mod root at `e:\spt-tarkov-ai\OptimizedMod\SAIN\` has two `.csproj` files:
 
 | Project | Location | Current compile scope |
 |---------|----------|----------------------|
-| Root `SAIN.csproj` | `SAIN\SAIN.csproj` | Compiles root-level `.cs` files; **excludes** `SAIN\**\*.cs` and `SAINServerMod\**\*.cs` |
-| Original `SAIN.csproj` | `SAIN\SAIN\SAIN.csproj` | Compiles the actual source tree at `SAIN\SAIN\` |
+| Root `SAIN.csproj` | `OptimizedMod\SAIN\SAIN.csproj` | SDK glob minus explicit **`Compile Remove`**: strips duplicate roots (`*.cs`, `Layers\**\*.cs`, `Components\**\*.cs`, …). **`SAIN\SAIN\**\*.cs` remains compiled** — this is the shipping tree for `SAIN.dll`. |
+| Nested `SAIN.csproj` | `OptimizedMod\SAIN\SAIN\SAIN.csproj` | Same logical sources under `SAIN\SAIN\` when built standalone (e.g. tooling open nested project only). |
 
-The root project was created as a development harness — it compiles root-level copies of source files (with modifications) while excluding the originals. The end goal is to **retire this split** and have the root `SAIN.csproj` compile the `SAIN\SAIN\` source tree directly.
+The root `.csproj` comment explicitly documents allowing `SAIN\SAIN\` sources while excluding stray duplicates at the mod folder root — agents should **not** assume `SAIN\**\*.cs` is excluded anymore.
 
 ---
 

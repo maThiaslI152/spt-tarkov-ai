@@ -1,4 +1,4 @@
-﻿using SAIN.Attributes;
+using SAIN.Attributes;
 
 namespace SAIN.Preset.GlobalSettings;
 
@@ -10,6 +10,15 @@ public class PerformanceSettings : SAINSettingsBase<PerformanceSettings>, ISAINS
             + "When OFF, bot AI runs at full quality regardless of distance or bot count."
     )]
     public bool PerformanceMode = false;
+
+    [Name("Max AI Frame Budget (ms)")]
+    [Description(
+        "Milliseconds of SAIN bot ManualUpdate work allowed per Unity frame (visible/audible/occluded tiers share this cap via round-robin). "
+            + "Higher values reduce skipped ticks and combat jitter at the cost of CPU. Typical 2–6."
+    )]
+    [MinMax(1f, 10f, 0.5f)]
+    [Advanced]
+    public float MaxAiBudgetMilliseconds = 2f;
 
     [Name("Vision Raycast Frequency")]
     [Description("How often vision raycasts update per second. Lower = less CPU, slower bot reactions. Range: 10-30 Hz")]

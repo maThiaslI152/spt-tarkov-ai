@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using SAIN.Components.PlayerComponentSpace;
+using EFT;
+using SAIN.Models.Enums;
 using SAIN.Plugin;
 using UnityEngine;
 
@@ -8,8 +10,9 @@ namespace SAIN.Components;
 
 /// <summary>
 /// AI Frame Budget Scheduler — enforces a hard cap (default 2ms) on AI processing per frame.
-/// Bots are tiered by player perception (Visible > Audible > Occluded) and processed in
-/// priority order within the budget. Remaining bots wait until subsequent frames.
+/// Bots are tiered by player perception (Visible > Audible > Occluded). Time is split across
+/// tiers so Audible combatants still get updates when many Visible bots exist (early-return
+/// starvation caused search/shoot loops and stale vision).
 /// This architecture is proven by STALKER Anomaly's Warfare mode, which handles 50+ squads
 /// and hundreds of NPCs at stable 60 FPS using the same budget-time approach.
 /// </summary>
@@ -52,7 +55,18 @@ public class AIFrameBudgetScheduler
 
     private readonly Stopwatch _frameTimer = new();
     private readonly List<OfflineSquad> _offlineSquads = new();
-    private int _resumeIndex;
+
+    /// <summary>Round-robin cursor for each tier (fairness when budget ends mid-list).</summary>
+    private int _resumeVisibleIndex;
+
+    private int _resumeAudibleIndex;
+    private int _resumeOccludedIndex;
+
+    /// <summary>Max elapsed ms allocated to Visible-tier bots before Audible tier runs (ratio of <see cref="MaxAIBudgetMs"/>).</summary>
+    private const double VisibleTierBudgetFraction = 0.45;
+
+    /// <summary>Cumulative cap before Occluded tier runs (Visible + Audible share).</summary>
+    private const double AudibleTierCumulativeFraction = 0.88;
 
     public AIFrameBudgetScheduler()
     {
@@ -110,9 +124,30 @@ public class AIFrameBudgetScheduler
         var audibleBots = new List<BotComponent>();
         var occludedBots = new List<BotComponent>();
 
+        // Bots under contact must tick every frame even if the 2ms budget would skip Occluded-tier
+        // processing — otherwise vanilla EFT layers (obfuscated names like GClass228) drive behavior.
+        var forceTickBots = new HashSet<BotComponent>();
         foreach (var bot in allBots)
         {
             if (bot == null || bot.IsDead || !bot.BotActive)
+                continue;
+            if (ShouldForceAiTick(bot))
+            {
+                forceTickBots.Add(bot);
+            }
+        }
+
+        foreach (var bot in forceTickBots)
+        {
+            ProcessBot(bot, currentTime, deltaTime);
+            BotsProcessedThisFrame++;
+        }
+
+        foreach (var bot in allBots)
+        {
+            if (bot == null || bot.IsDead || !bot.BotActive)
+                continue;
+            if (forceTickBots.Contains(bot))
                 continue;
 
             var tier = bot.CurrentPerceptionTier;
@@ -135,54 +170,25 @@ public class AIFrameBudgetScheduler
         OccludedBotsLastFrame = occludedBots.Count;
         TotalOnlineBots = visibleBots.Count + audibleBots.Count + occludedBots.Count;
 
-        // Phase 1: Visible bots (highest priority — must complete)
-        foreach (var bot in visibleBots)
+        SortTierByCombatPriority(visibleBots);
+        SortTierByCombatPriority(audibleBots);
+        SortTierByCombatPriority(occludedBots);
+
+        double visiblePhaseStopMs = MaxAIBudgetMs * VisibleTierBudgetFraction;
+        double audiblePhaseStopMs = MaxAIBudgetMs * AudibleTierCumulativeFraction;
+
+        ProcessTierRoundRobin(visibleBots, ref _resumeVisibleIndex, visiblePhaseStopMs, currentTime, deltaTime);
+        if (_frameTimer.Elapsed.TotalMilliseconds < MaxAIBudgetMs)
         {
-            if (ShouldStopProcessing())
-            {
-                BudgetExhaustedLastFrame = true;
-                BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
-                return;
-            }
-            ProcessBot(bot, currentTime, deltaTime);
-            BotsProcessedThisFrame++;
+            ProcessTierRoundRobin(audibleBots, ref _resumeAudibleIndex, audiblePhaseStopMs, currentTime, deltaTime);
         }
 
-        // Phase 2: Audible bots (medium priority — process what fits)
-        foreach (var bot in audibleBots)
+        if (_frameTimer.Elapsed.TotalMilliseconds < MaxAIBudgetMs)
         {
-            if (ShouldStopProcessing())
-            {
-                BudgetExhaustedLastFrame = true;
-                BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
-                return;
-            }
-            ProcessBot(bot, currentTime, deltaTime);
-            BotsProcessedThisFrame++;
+            ProcessTierRoundRobin(occludedBots, ref _resumeOccludedIndex, MaxAIBudgetMs, currentTime, deltaTime);
         }
 
-        // Phase 3: Occluded bots (lowest priority — leftover budget only)
-        int occludedCount = occludedBots.Count;
-        if (occludedCount > 0)
-        {
-            int startIndex = _resumeIndex % occludedCount;
-            for (int i = 0; i < occludedCount; i++)
-            {
-                if (ShouldStopProcessing())
-                {
-                    _resumeIndex = (startIndex + i) % occludedCount;
-                    BudgetExhaustedLastFrame = true;
-                    BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
-                    return;
-                }
-                int idx = (startIndex + i) % occludedCount;
-                ProcessBot(occludedBots[idx], currentTime, deltaTime);
-                BotsProcessedThisFrame++;
-            }
-            _resumeIndex = 0;
-        }
-
-        BudgetExhaustedLastFrame = false;
+        BudgetExhaustedLastFrame = _frameTimer.Elapsed.TotalMilliseconds >= MaxAIBudgetMs;
 
         // Save actual elapsed time for the performance monitor
         BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
@@ -278,9 +284,132 @@ public class AIFrameBudgetScheduler
         return _frameTimer.Elapsed.TotalMilliseconds >= MaxAIBudgetMs;
     }
 
+    /// <summary>
+    /// Bots actively fighting the human player get processed first within a tier so vision
+    /// and shooting logic stay fresh under frame caps.
+    /// </summary>
+    private static void SortTierByCombatPriority(List<BotComponent> bots)
+    {
+        if (bots == null || bots.Count < 2)
+        {
+            return;
+        }
+
+        bots.Sort(static (a, b) =>
+        {
+            float da = GetHumanGoalEnemyDistance(a);
+            float db = GetHumanGoalEnemyDistance(b);
+            int cmp = da.CompareTo(db);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            return string.CompareOrdinal(a?.name, b?.name);
+        });
+    }
+
+    private static float GetHumanGoalEnemyDistance(BotComponent bot)
+    {
+        var ge = bot?.EnemyController?.GoalEnemy;
+        if (ge == null || ge.IsAI)
+        {
+            return float.MaxValue;
+        }
+
+        return ge.RealDistance;
+    }
+
+    /// <summary>
+    /// One fair pass (or partial pass) over a tier: round-robin from resume cursor until
+    /// <paramref name="phaseStopMs"/> or global <see cref="MaxAIBudgetMs"/> is reached.
+    /// </summary>
+    private void ProcessTierRoundRobin(
+        List<BotComponent> tierBots,
+        ref int resumeIndex,
+        double phaseStopMs,
+        float currentTime,
+        float deltaTime
+    )
+    {
+        int n = tierBots?.Count ?? 0;
+        if (n == 0)
+        {
+            return;
+        }
+
+        int start = resumeIndex % n;
+        for (int i = 0; i < n; i++)
+        {
+            double elapsed = _frameTimer.Elapsed.TotalMilliseconds;
+            if (elapsed >= phaseStopMs || elapsed >= MaxAIBudgetMs)
+            {
+                resumeIndex = (start + i) % n;
+                return;
+            }
+
+            int idx = (start + i) % n;
+            ProcessBot(tierBots[idx], currentTime, deltaTime);
+            BotsProcessedThisFrame++;
+        }
+
+        resumeIndex = 0;
+    }
+
     private static void ProcessBot(BotComponent bot, float currentTime, float deltaTime)
     {
         bot.ManualUpdate(currentTime, deltaTime);
+    }
+
+    /// <summary>
+    /// When true, run this bot's SAIN ManualUpdate before tier/budget scheduling so GoalEnemy /
+    /// combat decisions stay aligned with EFT under fire / goal memory (vanilla fallback otherwise).
+    /// </summary>
+    private static bool ShouldForceAiTick(BotComponent bot)
+    {
+        BotOwner owner = bot?.BotOwner;
+        if (owner == null)
+        {
+            return false;
+        }
+
+        var enemyController = bot.EnemyController;
+        if (enemyController != null)
+        {
+            // Keep SAIN in control whenever we already have combat/threat context, even if EFT memory
+            // briefly drops GoalEnemy between updates. This avoids fallback to vanilla obfuscated layers.
+            if (enemyController.ActiveHumanEnemy
+                || enemyController.HumanEnemyInLineofSight
+                || enemyController.GoalEnemy != null
+                || enemyController.KnownEnemies.Count > 0)
+            {
+                return true;
+            }
+        }
+
+        var decision = bot.Decision;
+        if (decision != null
+            && (decision.CurrentCombatDecision != ECombatDecision.None
+                || decision.CurrentSquadDecision != ESquadDecision.None
+                || decision.CurrentSelfDecision != ESelfActionType.None))
+        {
+            return true;
+        }
+
+        BotMemoryClass memory = owner.Memory;
+        if (memory != null && (memory.IsUnderFire || memory.GoalEnemy != null))
+        {
+            return true;
+        }
+
+        // Recent damage: Medical ticks in the same ManualUpdate pipeline — pairing with under-fire covers most cases.
+        var medical = bot.Medical;
+        if (medical != null && medical.TimeLastShot > 0f && medical.TimeSinceShot < 3f)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>Throttled diagnostic log — summary of AI processing this frame.</summary>
@@ -303,7 +432,9 @@ public class AIFrameBudgetScheduler
     /// </summary>
     public void Reset()
     {
-        _resumeIndex = 0;
+        _resumeVisibleIndex = 0;
+        _resumeAudibleIndex = 0;
+        _resumeOccludedIndex = 0;
         BudgetExhaustedLastFrame = false;
         BotsProcessedThisFrame = 0;
         TotalOnlineBots = 0;

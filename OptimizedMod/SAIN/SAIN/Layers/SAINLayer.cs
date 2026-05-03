@@ -1,4 +1,5 @@
-﻿using System.Text;
+using System;
+using System.Text;
 using DrakiaXYZ.BigBrain.Brains;
 using EFT;
 using SAIN.Components;
@@ -49,6 +50,16 @@ public abstract class SAINLayer : CustomLayer
         else
         {
             SetLayer(false);
+            // Balance Pause() when a SAIN layer becomes active: leaving the last SAIN layer must resume
+            // patrolling or vanilla peace / third-party loot layers never get a chance to drive the bot.
+            if (Bot != null && Bot.ActiveLayer == ESAINLayer.None)
+            {
+                // LootingBots keeps patrol paused while its custom layer is active (see LootingLayer.Stop).
+                if (BrainManager.GetActiveLayerName(BotOwner) != "Looting")
+                {
+                    BotOwner.PatrollingData.Unpause();
+                }
+            }
         }
         _wasActive = isActiveNow;
     }
@@ -75,6 +86,35 @@ public abstract class SAINLayer : CustomLayer
     private readonly ESAINLayer ELayer;
 
     private string _currentLayerName;
+
+    // Optional State Tree-style throttling — pass a Func that computes activity without calling IsActive() (avoids recursion).
+    private bool _cachedIsActive;
+    private float _lastIsActiveCheckTime;
+    protected float IsActiveCheckInterval = 0.2f;
+
+    protected void ResetIsActiveEvaluationCache()
+    {
+        _cachedIsActive = false;
+        _lastIsActiveCheckTime = 0f;
+    }
+
+    protected bool CheckIsActiveWithCache(Func<bool> computeUncached)
+    {
+        bool isCurrentlyActive = _cachedIsActive;
+
+        if (isCurrentlyActive)
+        {
+            return _cachedIsActive = computeUncached();
+        }
+
+        if (Time.time - _lastIsActiveCheckTime >= IsActiveCheckInterval)
+        {
+            _lastIsActiveCheckTime = Time.time;
+            _cachedIsActive = computeUncached();
+        }
+
+        return _cachedIsActive;
+    }
 
     protected SAINLayer(BotOwner botOwner, int priority, string layerName, ESAINLayer eSainLayer) : base(botOwner, priority)
     {

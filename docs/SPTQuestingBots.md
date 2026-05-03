@@ -157,6 +157,12 @@ The solution is organized into **three main parts**:
 | SAIN | Recommended | 4.4.0+ | AI combat system, extraction |
 | Looting Bots | Recommended | 1.6.3+ | Bot looting behavior |
 
+### BigBrain Priority Guidance (with SAIN)
+- BigBrain arbitration is numeric priority among layers whose `IsActive()` is true.
+- Keep SAIN `LayerSettings` combat priorities (`SAINCombatSquadLayerPriority`, `SAINCombatSoloLayerPriority`) strictly above QuestingBots quest/navigation priorities.
+- If QB quest layers are equal/higher, bots can stay in quest movement while SAIN has already removed vanilla assault layers, reducing combat reaction quality.
+- Keep SAIN combat/extract higher, and tune QB so quest layers quickly drop out on contact.
+
 ---
 
 ## Configuration
@@ -186,6 +192,11 @@ Configuration is extensive, with 300+ settings organized into:
 - Bot cap adjustments (use EFT caps, map-specific overrides)
 - Initial boss spawn limiting
 - Scav spawn rate control
+
+### Combat Reactivity Knobs (QB)
+- **`brain_layer_priorities`**: keep QB quest/navigation priorities below SAIN combat/extract layer priorities.
+- **Hearing sensor settings** (`HearingSensorConfig`): tune detection/suspend thresholds so nearby shots and steps suspend questing promptly.
+- **Post-combat search cooldown** (`SearchTimeAfterCombatConfig`): tune resume/search delays so bots finish contact/search state before questing resumes.
 
 ---
 

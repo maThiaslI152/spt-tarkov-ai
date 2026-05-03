@@ -34,6 +34,8 @@ All project documentation lives in `docs/`. `INDEX.md` is the sole root-level en
 | **[docs/MoreBotsAPI.md](docs/MoreBotsAPI.md)** | MoreBotsAPI framework: custom WildSpawnType registration, client prepatching, server registration | Adding custom bot types |
 | **[docs/discussion1.md](docs/discussion1.md)** | Design discussion: architecture decisions, integration strategy, AI LOD, tick management, risk register | Understanding architectural trade-offs and decisions |
 | **[docs/PROGRESS.md](docs/PROGRESS.md)** | Implementation progress tracker for the optimization work | Tracking what's done and what remains |
+| **[docs/ROGUE_BASE_DEFENSE_PLAN.md](docs/ROGUE_BASE_DEFENSE_PLAN.md)** | Planned Rogue (`ExUsec`) base-defense squad coordination + no-loot policy | Designing/defending Rogue behavior on Lighthouse without regressions |
+| **[docs/BUGFIX-BigBrainPriority-QuestingBots.md](docs/BUGFIX-BigBrainPriority-QuestingBots.md)** | BigBrain arbitration fix: QuestingBots vs SAIN combat gating + minimal diagnostics | Debugging passive combat / wrong active layer selection with QuestingBots |
 | **[docs/BUGFIX-SAINAILimit-Audibility.md](docs/BUGFIX-SAINAILimit-Audibility.md)** | Critical bugfix: SAINAILimit audibility detection was broken — bots not fighting, Big Pipe passive | Debugging AI "detect → stop → loop" behavior or boss passivity |
 | **[docs/BUGFIX-SAINLayerPriority.md](docs/BUGFIX-SAINLayerPriority.md)** | Critical bugfix: SAIN combat layers at priority 20-22 blocked by BotMind — bots stuck in patrol, never fight | Debugging bots ignoring player fire or stuck in patrol/follow |
 
@@ -46,7 +48,7 @@ All project documentation lives in `docs/`. `INDEX.md` is the sole root-level en
 ```
 Tarkov AI/
 ├── INDEX.md                         ← You are here (root-level entry point)
-├── docs/                            ← All project documentation (12 files)
+├── docs/                            ← All project documentation (13+ files)
 │   ├── ARCHITECTURE.md              ← Mod internals (classes, ticks, layers)
 │   ├── INTEGRATION.md               ← Cross-mod wiring (dependencies, priorities, interop)
 │   ├── RESEARCH.md                  ← Research findings and filtered recommendations
@@ -56,21 +58,22 @@ Tarkov AI/
 │   ├── SPTQuestingBots.md           ← QuestingBots mod overview and architecture
 │   ├── MoreBotsAPI.md               ← MoreBotsAPI framework documentation
 │   ├── discussion1.md               ← Architectural design discussion
+│   ├── BUGFIX-BigBrainPriority-QuestingBots.md ← BigBrain arbitration + QB combat gating bugfix
 │   ├── BUGFIX-SAINAILimit-Audibility.md ← Critical AI behavior bugfix (detect→loop, Big Pipe)
 │   ├── BUGFIX-SAINLayerPriority.md   ← Combat layer priority fix (bots stuck in patrol)
+│   ├── ROGUE_BASE_DEFENSE_PLAN.md    ← Planned Rogue base-defense squad coordination + no-loot policy
 │   └── PROGRESS.md                  ← Implementation progress tracker
 │
 ├── OptimizedMod/                     ← ALL source code lives here
-│   ├── SAIN/                         ← Combat AI: vision, cover, squad, hearing, suppression
-│   │   ├── SAINPlugin.cs             ← [BepInPlugin] entry, TryCreateCustomPreset()
+│   ├── SAIN/                         ← Combat AI: shipped sources live under SAIN/SAIN/
+│   │   ├── SAIN.csproj               ← Root build compiles `SAIN/**` only; legacy duplicate roots (Classes/, Components/, …) removed from repo
+│   │   ├── SAIN/SAINPlugin.cs        ← [BepInPlugin] entry, TryCreateCustomPreset()
 │   │   ├── SAIN/Plugin/BigBrainHandler.cs ← Registers SAIN layers, removes vanilla layers
-│   │   ├── SAIN/Layers/              ← CustomLayer implementations (CombatSolo, CombatSquad, etc.)
-│   │   ├── SAIN/Components/          ← MonoBehaviour components (BotComponent, CoverFinder, etc.)
+│   │   ├── SAIN/Layers/              ← CustomLayer implementations (CombatSolo, CombatSquad, …)
+│   │   ├── SAIN/Components/          ← MonoBehaviour components (BotComponent, BudgetScheduler, …)
 │   │   ├── SAIN/Classes/Bot/         ← Per-bot subsystems (Decision, Vision, Hearing, Memory, etc.)
 │   │   ├── SAIN/Classes/BotManager/Jobs/ ← Coroutine-based global jobs
 │   │   ├── SAIN/Preset/              ← Configuration system (GlobalSettings, BotSettings)
-│   │   ├── Components/               ← Top-level components (BotManager, GameWorld, etc.)
-│   │   └── Layers/                   ← Top-level layers
 │   │
 │   ├── BigBrain/                     ← Framework: BrainManager, CustomLayer, CustomLogic
 │   │   ├── BigBrainPlugin.cs         ← [BepInPlugin] entry, 6 Harmony patches
@@ -82,7 +85,7 @@ Tarkov AI/
 │   │
 │   ├── LootingBots/                  ← Looting AI: corpse/container/item scanning, gear swap
 │   │   ├── LootingBots/LootingBots.cs     ← [BepInPlugin] entry, config, layer registration
-│   │   ├── LootingBots/LootingLayer.cs    ← CustomLayer (extends BigBrain directly, priority 4-13)
+│   │   ├── LootingBots/LootingLayer.cs    ← CustomLayer; priority via BigBrainLootLayerPriority (default 62)
 │   │   ├── LootingBots/Logic/        ← CustomLogic implementations (FindLoot, Loot, Peaceful)
 │   │   ├── LootingBots/Components/   ← MonoBehaviour components (LootingBrain, LootFinder)
 │   │   ├── LootingBots/External.cs   ← Public interop API (ForceBotToScanLoot, etc.)
@@ -104,8 +107,8 @@ Tarkov AI/
 │   │   ├── Plugin/Plugin.cs          ← Client BepInEx plugin
 │   │   └── Server/                   ← Server-side registration
 │   │
-│   └── OptimizationCore/             ← New shared performance library (standalone)
-│       ├── AIFrameBudgetScheduler.cs ← 2ms hard cap per frame, priority-tiered bot processing
+│   └── OptimizationCore/             ← Shared perf library (not referenced by SAIN.csproj; SAIN inlines scheduler/components)
+│       ├── AIFrameBudgetScheduler.cs ← Reference patterns duplicated under `SAIN/SAIN/Components/` for shipping DLL
 │       ├── PerceptionSystem.cs       ← Player-centric visibility (frustum + raycast) and audibility
 │       ├── OfflineCombatResolver.cs  ← Statistical AI-vs-AI combat using bot stats
 │       ├── CombatAudioSpoofer.cs     ← Fake gunfire audio at combat zones with distance attenuation
@@ -144,11 +147,10 @@ Priority 99: SAIN DebugLayer        (always wins if debug mode)
 Priority 80: SAIN AvoidThreatLayer  (grenade/artillery nearby)
 Priority 65: SAIN ExtractLayer      (bot wants to extract)
 Priority 60-70: SAIN Combat layers  (bot in combat)
-Priority 4-13: LootingBots layers   (bot peaceful, loot available)
+Priority ~62: LootingBots LootingLayer (default BigBrainLootLayerPriority — peaceful loot/peace)
 ```
 
-**Key rule:** SAIN combat layers (60+) always override LootingBots (4-13). Looting only happens
-when no SAIN layer is active.
+**Key rule:** BigBrain picks the **highest-priority active layer**. With fork defaults, SAIN combat/extract (>62) beats LootingBots loot/peace; loot runs when those layers are inactive. Misconfigured priorities can change that — see `docs/INTEGRATION.md`.
 
 ### 3. Bot Tick Architecture (SAIN)
 
@@ -227,7 +229,7 @@ Three mods operate **without BigBrain** because they work at a lower level:
 ### Task: Understand how SAIN and LootingBots coexist
 
 1. Read `docs/INTEGRATION.md` → SAIN ↔ LootingBots section
-2. Key insight: Layer priority determines behavior. Combat (60+) > Looting (4-13)
+2. Key insight: Numeric priority determines behavior (fork default ~62 loot vs higher SAIN combat).
 3. Interop API: LootingBots exposes `External.PreventBotFromLooting()` and `ForceBotToScanLoot()`
 
 ### Task: Add a new mod to the workspace
@@ -311,7 +313,7 @@ record frame time (BepInEx.FPSCounter or SAIN debug overlay), and add a row abov
 | How a CustomLayer works | `BigBrain/Brains/CustomLayer.cs` | Full file (49 lines) |
 | How a CustomLogic works | `BigBrain/Brains/CustomLogic.cs` | Full file (27 lines) |
 | BigBrain wrapper internals | `BigBrain/Internal/CustomLayerWrapper.cs`, `CustomLogicWrapper.cs` | Whole files |
-| SAIN tick entry point | `SAIN/Components/GameWorldComponent.cs` | `WorldTick()` |
+| SAIN tick entry point | `SAIN/SAIN/Components/GameWorldComponent.cs` | `WorldTick()` |
 | SAIN bot tick groups | `SAIN/SAIN/Components/BotComponent.cs` | `ManualUpdate()`, `TickClassGroup()` |
 | SAIN performance architecture | `docs/PERFORMANCE_ARCHITECTURE.md` | Full document |
 | SAIN AI limit tiers | `SAIN/SAIN/Classes/Bot/SAINAILimit.cs` | `AILimitSetting` enum |
@@ -347,19 +349,16 @@ Complete priority hierarchy across all mods:
 | ~65 | ExtractLayer | SAIN | PMCs, Scavs (configurable) |
 | ~60-70 | CombatSquadLayer | SAIN | All |
 | ~60-70 | CombatSoloLayer | SAIN | All |
-| 13 | LootingLayer | LootingBots | SectantWarrior, SectantPriest |
-| 11 | LootingLayer | LootingBots | Obdolbs (zombies) |
-| 5 | LootingLayer | LootingBots | PMCs, Rogues, ArenaFighters |
-| 4 | LootingLayer | LootingBots | Scavs, Bosses, Followers, Goons |
+| ~62 (cfg) | LootingLayer | LootingBots | All registered brains (`BigBrainLootLayerPriority` default 62) |
 
 ---
 
 ## Quick Answers
 
 **Q: Why can't SAIN and LootingBots run at the same time?**
-A: They can, but only one layer is active at a time due to BigBrain's priority system. SAIN's
-combat layers (priority 60+) always win over LootingBots (4-13). When combat ends, SAIN layers
-report `IsActive() = false` and LootingBots' layer can activate.
+A: They can coexist on every bot; BigBrain activates **one** layer per decision cycle based on
+`IsActive()` and numeric priority. With fork defaults, SAIN combat/extract priorities beat LootingBots'
+loot layer (~62). When combat SAIN layers go inactive, loot/peace can run.
 
 **Q: Where are performance settings stored?**
 A: SAIN: `OptimizedMod/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs`. LootingBots:

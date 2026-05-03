@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using DrakiaXYZ.BigBrain.Brains;
@@ -454,35 +454,34 @@ public static class BigBrainHandler
         private static void AddCustomLayersToBosses()
         {
             List<string> brainList = GetBrainList(AIBrains.Bosses);
+            var settings = SAINPlugin.LoadedPreset.GlobalSettings.General.Layers;
 
-            //var settings = SAINPlugin.LoadedPreset.GlobalSettings.General;
-            //BrainManager.AddCustomLayer(typeof(BotUnstuckLayer), stringList, 98);
             BrainManager.AddCustomLayer(typeof(DebugLayer), brainList, 99);
             BrainManager.AddCustomLayer(typeof(SAINAvoidThreatLayer), brainList, 80);
-            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, 70);
-            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, 69);
+            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, settings.SAINCombatSquadLayerPriority);
+            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, settings.SAINCombatSoloLayerPriority);
         }
 
         private static void AddCustomLayersToFollowers()
         {
             List<string> brainList = GetBrainList(AIBrains.Followers);
+            var settings = SAINPlugin.LoadedPreset.GlobalSettings.General.Layers;
 
-            //var settings = SAINPlugin.LoadedPreset.GlobalSettings.General;
-            //BrainManager.AddCustomLayer(typeof(BotUnstuckLayer), stringList, 98);
             BrainManager.AddCustomLayer(typeof(DebugLayer), brainList, 99);
             BrainManager.AddCustomLayer(typeof(SAINAvoidThreatLayer), brainList, 80);
-            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, 70);
-            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, 69);
+            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, settings.SAINCombatSquadLayerPriority);
+            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, settings.SAINCombatSoloLayerPriority);
         }
 
         private static void AddCustomLayersToGoons()
         {
             List<string> brainList = GetBrainList(AIBrains.Goons);
+            var settings = SAINPlugin.LoadedPreset.GlobalSettings.General.Layers;
 
             BrainManager.AddCustomLayer(typeof(DebugLayer), brainList, 99);
             BrainManager.AddCustomLayer(typeof(SAINAvoidThreatLayer), brainList, 80);
-            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, 64);
-            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, 62);
+            BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, settings.SAINCombatSquadLayerPriority);
+            BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, settings.SAINCombatSoloLayerPriority);
         }
 
         private static void CheckExtractEnabled(List<string> layersToRemove)

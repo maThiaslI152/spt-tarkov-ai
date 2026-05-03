@@ -67,7 +67,6 @@ public class SAINPerformanceMonitor : MonoBehaviour
     private string _csvPath;
     private float _lastLogTime;
     private float _lastCSVWriteTime;
-    private bool _csvHeaderWritten;
     private readonly Stopwatch _frameTimer = new();
 
     // ── Unity Lifecycle ───────────────────────────────────────────────────────
@@ -87,6 +86,8 @@ public class SAINPerformanceMonitor : MonoBehaviour
 
     public void Update()
     {
+        EnsureCSVWriterState();
+
         // Track frame timing
         FrameDeltaTimeMs = Time.unscaledDeltaTime * 1000f;
         _avgFrameTime.Add(FrameDeltaTimeMs);
@@ -122,12 +123,7 @@ public class SAINPerformanceMonitor : MonoBehaviour
 
     public void OnDestroy()
     {
-        if (_csvWriter != null)
-        {
-            _csvWriter.Flush();
-            _csvWriter.Close();
-            _csvWriter = null;
-        }
+        CloseCSV();
     }
 
     // ── Data Collection ───────────────────────────────────────────────────────
@@ -192,11 +188,36 @@ public class SAINPerformanceMonitor : MonoBehaviour
         }
     }
 
+    private void EnsureCSVWriterState()
+    {
+        if (LogToCSV && _csvWriter == null)
+        {
+            InitializeCSV();
+        }
+        else if (!LogToCSV && _csvWriter != null)
+        {
+            CloseCSV();
+        }
+    }
+
+    private void CloseCSV()
+    {
+        if (_csvWriter == null)
+        {
+            return;
+        }
+        _csvWriter.Flush();
+        _csvWriter.Close();
+        _csvWriter = null;
+    }
+
     private void WriteCSVHeader()
     {
         if (_csvWriter == null) return;
-        _csvWriter.WriteLine("Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhausted%," +
-            "VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool");
+        _csvWriter.WriteLine(
+            "Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhaustedNow,BudgetExhausted%," +
+            "BudgetHeadroomMs,ProcessedBots,SkippedBots,VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool"
+        );
         _csvWriter.Flush();
     }
 
@@ -205,9 +226,12 @@ public class SAINPerformanceMonitor : MonoBehaviour
         if (_csvWriter == null) return;
         try
         {
+            float headroomMs = Mathf.Max(0f, BudgetLimitMs - BudgetUsedMs);
             _csvWriter.WriteLine($"{DateTime.UtcNow:O},{CurrentFPS:F1},{FrameDeltaTimeMs:F2}," +
                 $"{BudgetUsedMs:F3},{BudgetLimitMs:F1},{BudgetUtilizationPercent:F1}," +
-                $"{BudgetExhaustedRate:F1},{VisibleBots},{AudibleBots},{OccludedBots}," +
+                $"{(BudgetExhaustedThisFrame ? 1 : 0)},{BudgetExhaustedRate:F1}," +
+                $"{headroomMs:F3},{BotsProcessedThisFrame},{BotsSkippedThisFrame}," +
+                $"{VisibleBots},{AudibleBots},{OccludedBots}," +
                 $"{OfflineSquadCount},{TotalOnlineBots},{PooledBotCount},{ActivePoolBotCount}");
             _csvWriter.Flush();
         }
@@ -218,11 +242,12 @@ public class SAINPerformanceMonitor : MonoBehaviour
 
     private void LogSummary()
     {
+        float headroomMs = Mathf.Max(0f, BudgetLimitMs - BudgetUsedMs);
         UnityEngine.Debug.Log(
             $"[SAIN Perf] FPS:{CurrentFPS:F0} | Frame:{FrameDeltaTimeMs:F1}ms(avg {AvgFrameTimeMs:F1}) | " +
             $"AI Budget:{BudgetUsedMs:F2}/{BudgetLimitMs:F1}ms ({BudgetUtilizationPercent:F0}%) " +
-            $"Exhausted:{BudgetExhaustedRate:F0}% | " +
-            $"Bots V:{VisibleBots} A:{AudibleBots} O:{OccludedBots} Off:{OfflineSquadCount} | " +
+            $"Headroom:{headroomMs:F2}ms ExhaustNow:{(BudgetExhaustedThisFrame ? "Y" : "N")} Exhausted:{BudgetExhaustedRate:F0}% | " +
+            $"Bots Proc:{BotsProcessedThisFrame} Skip:{BotsSkippedThisFrame} V:{VisibleBots} A:{AudibleBots} O:{OccludedBots} Off:{OfflineSquadCount} | " +
             $"Pool:{PooledBotCount}"
         );
     }
@@ -236,6 +261,8 @@ public class SAINPerformanceMonitor : MonoBehaviour
         sb.AppendLine($"  FPS:              {CurrentFPS:F1}");
         sb.AppendLine($"  Frame Time:       {FrameDeltaTimeMs:F2} ms (avg {AvgFrameTimeMs:F2} ms)");
         sb.AppendLine($"  AI Budget Used:   {BudgetUsedMs:F3} / {BudgetLimitMs:F1} ms ({BudgetUtilizationPercent:F1}%)");
+        sb.AppendLine($"  Headroom:         {Mathf.Max(0f, BudgetLimitMs - BudgetUsedMs):F3} ms");
+        sb.AppendLine($"  Exhausted Now:    {BudgetExhaustedThisFrame}");
         sb.AppendLine($"  Budget Exhausted: {BudgetExhaustedRate:F1}% of frames");
         sb.AppendLine($"  ─────────────────────────────────────────────");
         sb.AppendLine($"  Visible Bots:     {VisibleBots}");

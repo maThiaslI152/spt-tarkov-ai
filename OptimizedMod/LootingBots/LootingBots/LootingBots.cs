@@ -85,6 +85,12 @@ public class LootingBots : BaseUnityPlugin
     public static ConfigEntry<int> LimitDistanceFromPlayer;
     public static ConfigEntry<int> MaxConcurrentScans;
 
+    /// <summary>
+    /// BigBrain priority for the Looting custom layer. Default elevated so LootingBots + SAIN + BotMind
+    /// stacks resolve loot/peace actions above typical quest layers (~50) while staying below SAIN extract/combat.
+    /// </summary>
+    public static ConfigEntry<int> BigBrainLootLayerPriority;
+
     public void LootFinderSettings()
     {
         CorpseLootingEnabled = Config.Bind(
@@ -443,6 +449,23 @@ public class LootingBots : BaseUnityPlugin
         );
     }
 
+    public void CompatibilitySettings()
+    {
+        const int defaultLootPriority = 62;
+        BigBrainLootLayerPriority = Config.Bind(
+            "Compatibility",
+            "BigBrain Loot layer priority",
+            defaultLootPriority,
+            new ConfigDescription(
+                "Priority of LootingBots' BigBrain layer (higher = wins over lower layers when both are active). "
+                    + "Use ~62 with SAIN defaults (extract ~65, combat ~69–70) so loot/peace runs above BotMind questing (~50) but combat still overrides. "
+                    + "Requires new raid after change.",
+                new AcceptableValueRange<int>(40, 68),
+                new ConfigurationManagerAttributes { Order = 0 }
+            )
+        );
+    }
+
     public void Awake()
     {
         _patchManager = new PatchManager(this, true);
@@ -450,6 +473,7 @@ public class LootingBots : BaseUnityPlugin
         LootFinderSettings();
         LootSettings();
         PerformanceSettings();
+        CompatibilitySettings();
 
         LootLog = new Log(Logger, LootingLogLevels);
         InteropLog = new Log(Logger, InteropLogLevels);
@@ -457,6 +481,9 @@ public class LootingBots : BaseUnityPlugin
         ItemAppraiser = new ItemAppraiser(ItemAppraiserLog);
 
         _patchManager.EnablePatches();
+
+        int lootPriority = BigBrainLootLayerPriority.Value;
+        Logger.LogInfo($"[LootingBots] BigBrain Loot layer priority = {lootPriority} (SAIN extract~65 / combat~69–70 should stay higher)");
 
         BrainManager.RemoveLayer(
             "Utility peace",
@@ -494,16 +521,16 @@ public class LootingBots : BaseUnityPlugin
                 "FollowerBully",
                 "FlBoar",
             ],
-            4
+            lootPriority
         );
 
-        BrainManager.AddCustomLayer(typeof(LootingLayer), ["PMC", "PmcUsec", "PmcBear", "ExUsec", "ArenaFighter"], 5);
+        BrainManager.AddCustomLayer(typeof(LootingLayer), ["PMC", "PmcUsec", "PmcBear", "ExUsec", "ArenaFighter"], lootPriority);
 
-        BrainManager.AddCustomLayer(typeof(LootingLayer), ["SectantWarrior"], 13);
+        BrainManager.AddCustomLayer(typeof(LootingLayer), ["SectantWarrior"], lootPriority);
 
-        BrainManager.AddCustomLayer(typeof(LootingLayer), ["SectantPriest"], 13);
+        BrainManager.AddCustomLayer(typeof(LootingLayer), ["SectantPriest"], lootPriority);
 
-        BrainManager.AddCustomLayer(typeof(LootingLayer), ["Obdolbs"], 11);
+        BrainManager.AddCustomLayer(typeof(LootingLayer), ["Obdolbs"], lootPriority);
     }
 
     public void Update()

@@ -1,4 +1,4 @@
-﻿using EFT;
+using EFT;
 using EFT.InventoryLogic;
 using SAIN.Components;
 using SAIN.SAINComponent.Classes.EnemyClasses;
@@ -110,9 +110,25 @@ public class SAINShootData : BotComponentClassBase
             )
         )
         {
-            return false;
+            // Default: no shooting while sprinting (vanilla-like). Point-blank vs human: allow
+            // return fire while repositioning — fixes run–stop loops with SeekCover / Search.
+            if (!ShallAllowShootWhileSprinting(priorityEnemy))
+            {
+                return false;
+            }
         }
         return GetEnemyToShoot(priorityEnemy) != null;
+    }
+
+    private bool ShallAllowShootWhileSprinting(Enemy priorityEnemy)
+    {
+        var goal = priorityEnemy ?? Bot.EnemyController?.GoalEnemy;
+        if (goal == null || goal.IsAI)
+        {
+            return false;
+        }
+
+        return goal.RealDistance <= 18f;
     }
 
     private void UpdateADS(Enemy enemy)
@@ -297,7 +313,9 @@ public class SAINShootData : BotComponentClassBase
 
     private static Vector3? GetAimTarget(Enemy enemy, BotComponent bot)
     {
-        if (enemy != null && enemy.IsVisible && enemy.CanShoot)
+        // Very close targets: allow aim when any body part is visible even if no "clean"
+        // shoot slot yet — avoids standing idle at knife-fight range (CanShoot lags cover rays).
+        if (enemy != null && enemy.IsVisible && (enemy.CanShoot || enemy.RealDistance <= 10f))
         {
             //Vector3? test = enemy.Shoot.Targets.GetPointToShoot();
             //if (test == null) {

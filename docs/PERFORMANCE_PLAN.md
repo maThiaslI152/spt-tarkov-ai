@@ -26,10 +26,10 @@ status: completed
 content: "Phase 3.1: Implement shared squad awareness via TalkClass bypass (propagate enemy detection without redundant per-bot raycasts)"
 status: completed
 - id: phase3-squad-collapse
-content: "Phase 3.2: Push target distribution, flanking, and suppression decisions to CombatSquadLayer (squad coordinator pattern)"
+content: "Phase 3.2: SquadCombatCoordinator + leader hook from CombatSquadLayer (`SAIN/SAIN/Layers/Combat/Squad/`)"
 status: completed
 - id: phase3-bigbrain-st
-content: "Phase 3.3: Migrate BigBrain layer evaluation from all-layers-every-tick to active-layer-plus-transitions-only (State Tree pattern)"
+content: "Phase 3.3: Optional CheckIsActiveWithCache on SAINLayer (`SAIN/SAIN/Layers/SAINLayer.cs`) — BigBrain/EFT layer arbitration unchanged"
 status: completed
 - id: phase4-objectpool
 content: "Phase 4.1: Implement bot GameObject pool/recycle system — intercept EFT destroy/spawn via Harmony, pool BotOwner GameObjects instead of destroying/recreating"
@@ -158,6 +158,8 @@ public class AIFrameBudgetScheduler
     }
 }
 ```
+
+**Shipped SAIN fork note:** `AIFrameBudgetScheduler` uses **`ProcessTierRoundRobin`** with per-tier **resume indices** and **phase ceilings** (~45% Visible slice, cumulative ~88% before Occluded) rather than a naive single `foreach` per tier. Conceptually the same budget guarantee; pseudocode above is simplified.
 
 **Why budget time is the foundation, not just an optimization:**
 
@@ -651,12 +653,13 @@ All maps land under 5ms of AI frame budget for online bots. Offline squads cost 
 - Pattern from Bannerlord's 1000-agent battles and Call of Duty's 17-bot local multiplayer
 - Impact: Dramatic reduction for Tarkov's boss/guard groups (Reshala + 4 guards = 5x redundant computation eliminated)
 
+**Fork status:** `SquadCombatCoordinator` ships under `SAIN/SAIN/Layers/Combat/Squad/` and runs when the squad leader’s `CombatSquadLayer` is active (`CoordinateSquad` on leader tick).
+
 **8. BigBrain layer evaluation migration (State Tree pattern)**
 
-- Currently: BigBrain evaluates ALL layers every tick via `ShallUseNow()` (like Behavior Tree)
-- Change: Switch to "active layer + transitions only" check (like State Tree)
-- Based on StraySpark data: Behavior Tree = 0.042ms/tick/agent, State Tree = 0.011ms/tick/agent (4x reduction)
-- Impact: Per-agent reduction in BigBrain's layer arbitration cost
+- Originally scoped: change BigBrain so **not every layer’s `IsActive()` runs every tick** — "active layer + transitions only"
+- **Shipped in this fork:** optional **`CheckIsActiveWithCache()`** on `SAIN/SAIN/Layers/SAINLayer.cs` for mods that choose to throttle inactive checks; BigBrain / EFT wrappers still drive layer polling unless separately patched.
+- StraySpark-style gains require edits to **`CustomLayerWrapper` / `BrainManager`** (not done here); treat Phase 3.3 doc narrative as **design target + partial helper**, not completed framework migration.
 
 ### Phase 4: Bot GameObject Recycling (Call of Duty Spawn Pattern)
 
@@ -725,7 +728,7 @@ Shared squad awareness             TalkClass bypass (Phase 3.1)
 | Mod                           | Forked?                                                                                                                                                                       | Can Edit?    | Primary Changes                                                                                                                        |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **SAIN**                      | Yes (954 files)                                                                                                                                                               | Full control | TickInterval, coroutines, vision LOD, perception LOD, boss override, squads, BigBrain layer eval                                       |
-| **BigBrain**                  | Yes                                                                                                                                                                           | Full control | State Tree migration, layer arbitration optimization                                                                                   |
+| **BigBrain**                  | Yes                                                                                                                                                                           | Full control | Layer arbitration — **State Tree migration optional / not shipped** in SAIN fork (helper lives on `SAINLayer` only)                                                                                   |
 | **LootingBots**               | Yes                                                                                                                                                                           | Full control | State reset wiring for pool                                                                                                            |
 | **Waypoints**                 | Yes                                                                                                                                                                           | Full control | Path cache for recycled bots, objective navigation                                                                                     |
 | **SPT-AILimit**               | Yes                                                                                                                                                                           | Full control | Pool compatibility, distance tracking                                                                                                  |
@@ -762,8 +765,8 @@ Phase 2.5 Perception LOD + Offline Combat
     └── SPT-AILimit: Compatibility patch (see below)
     ↓
 Phase 3 Squad Collapse
-    ├── SAIN: TalkClass bypass, CombatSquadLayer rewrite
-    └── BigBrain: State Tree migration (layer evaluation)
+    ├── SAIN: TalkClass bypass, squad coordinator + CombatSquadLayer leader hook
+    └── BigBrain: State Tree migration — **only optional SAINLayer cache helper in fork** (wrapper migration TBD)
     ↓
 Phase 4 Object Pooling (touches ALL mods)
     ├── EFT Core: Harmony patches on spawn/destroy
@@ -794,8 +797,8 @@ Phase 4 Object Pooling (touches ALL mods)
 | 2.5   | `Components/BotComponent.cs`                   | Skip tick groups per tier                |
 | 2.5   | **NEW** `Components/CombatAudioSpoofer.cs`     | Audio faking for offline combat          |
 | 3.1   | `Classes/Bot/Talk/SAINBotTalkClass.cs`         | Squad awareness bypass                   |
-| 3.2   | `Layers/Combat/Solo/CombatSoloLayer.cs`        | Squad coordinator logic                  |
-| 3.2   | `Layers/Combat/Squad/CombatSquadLayer.cs`      | Target distribution, flanking assignment |
+| 3.2   | `SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | Coordinator logic                          |
+| 3.2   | `SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs`       | Leader calls `CoordinateSquad`             |
 | 4     | `Components/BotComponent.cs`                   | BotComponent state reset for pool        |
 
 
@@ -804,8 +807,8 @@ Phase 4 Object Pooling (touches ALL mods)
 
 | Phase | Files                            | What Changes                              |
 | ----- | -------------------------------- | ----------------------------------------- |
-| 3.3   | `Internal/CustomLayerWrapper.cs` | ShallUseNow() → active-layer-only check   |
-| 3.3   | `Brains/BrainManager.cs`         | State-Tree-style transition registration  |
+| 3.3   | `SAIN/SAIN/Layers/SAINLayer.cs`  | Optional `CheckIsActiveWithCache()` (helper only) |
+| 3.3   | *(not in fork)* `Internal/CustomLayerWrapper.cs`, `Brains/BrainManager.cs` | Planned BigBrain arbitration changes |
 | 4     | `Internal/CustomLayerWrapper.cs` | Stop()/Start() lifecycle for pool recycle |
 
 
@@ -875,7 +878,7 @@ Recommendation: (A) for Phase 2.2. Replace coroutine scheduling with direct tick
 
 **3. BigBrain State Tree Migration vs Existing Layer Registration**
 
-BigBrain's `ShallUseNow()` evaluates ALL layers every tick. Phase 3.3 changes this to "active layer + transitions only." This must preserve backward compatibility with SAIN and LootingBots layer registration — they still call `BrainManager.AddCustomLayer()`, but the internal evaluation changes. No API break.
+BigBrain's `ShallUseNow()` evaluates ALL layers every tick. Phase 3.3 originally targeted "active layer + transitions only" inside BigBrain without breaking `BrainManager.AddCustomLayer()` registration. **This fork has not changed BigBrain arbitration** — only an optional `SAINLayer` cache helper exists (see Phase 3 section above).
 
 **4. Object Pool vs EFT Spawn Lifecycle**
 

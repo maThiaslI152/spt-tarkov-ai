@@ -102,33 +102,34 @@ OptimizedMod/
 │   ├── IOfflineSquad.cs
 │   ├── OfflineCombatTypes.cs
 │   └── OptimizationCore.csproj
-├── SAIN/Components/
+├── SAIN/SAIN/Components/
 │   ├── AIFrameBudgetScheduler.cs
 │   ├── OfflineCombatResolver.cs
 │   ├── CombatAudioSpoofer.cs
 │   ├── SAINPerformanceMonitor.cs
 │   ├── BotGameObjectPool.cs
 │   └── BotComponent.cs (modified)
-├── SAIN/Layers/Combat/Squad/
-│   └── SquadCombatCoordinator.cs
-├── SAIN/Patches/
+├── SAIN/SAIN/Layers/Combat/Squad/
+│   ├── SquadCombatCoordinator.cs
+│   └── CombatSquadLayer.cs (leader calls CoordinateSquad)
+├── SAIN/SAIN/Patches/
 │   └── BotPoolPatches.cs
 ```
 
 ### Modified files (key changes)
-- `SAIN/Classes/Bot/BotBase.cs` — TickInterval = 1f/30f
-- `SAIN/Classes/Bot/SAINAILimit.cs` — PerceptionTier, visibility/audibility
-- `SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs` — LOD raycast reduction
-- `SAIN/Classes/Bot/EnemyControllers/SAINEnemyController.cs` — Squad propagation
-- `SAIN/Classes/BotManager/Squad.cs` — Squad awareness
-- `SAIN/Layers/SAINLayer.cs` — CheckIsActiveWithCache (State Tree)
-- `SAIN/Layers/Combat/Squad/CombatSquadLayer.cs` — Squad coordinator integration
-- `SAIN/SAINPlugin.cs` — Pool init + F12 perf monitor config
-- `SAIN/Components/BotManagerComponent.cs` — Budget scheduler + perf monitor wiring
-- `BigBrain/Internal/CustomLayerWrapper.cs` — State Tree migration
+- `SAIN/SAIN/Classes/Bot/BotBase.cs` — TickInterval = 1f/30f
+- `SAIN/SAIN/Classes/Bot/SAINAILimit.cs` — PerceptionTier, visibility/audibility
+- `SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs` — LOD raycast reduction
+- `SAIN/SAIN/Classes/Bot/EnemyControllers/SAINEnemyController.cs` — Squad propagation
+- `SAIN/SAIN/Classes/BotManager/Squad.cs` — Squad awareness
+- `SAIN/SAIN/Layers/SAINLayer.cs` — optional CheckIsActiveWithCache helper
+- `SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs` — squad coordinator integration (leader)
+- `SAIN/SAIN/SAINPlugin.cs` — Pool init + F12 perf monitor config
+- `SAIN/SAIN/Components/BotManagerComponent.cs` — Budget scheduler + perf monitor wiring
+- `BigBrain/Internal/CustomLayerWrapper.cs` — *(planned)* State Tree migration — **not shipped** in this fork
 - `LootingBots/.../LootingBrain.cs` — ResetForPoolRecycle
 - `AILimit/Component.cs` — LINQ allocation fix
-- `SAIN/Preset/.../PerformanceSettings.cs` — PerformanceMode=true
+- `SAIN/SAIN/Preset/.../PerformanceSettings.cs` — PerformanceMode=true
 
 ## Known Limitations
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using SAIN.Components;
 using SAIN.Preset.GlobalSettings;
 using UnityEngine;
@@ -144,8 +144,28 @@ public class SAINAILimit : BotComponentClassBase
         if (Bot.EnemyController.Enemies.Count > 0)
             return PerceptionTier.Audible;
 
+        // Human nearby but not yet an EFT/SAIN "enemy" (e.g. third-party quest layer finished
+        // and bot idles): avoid full Occlusion so SAIN + enemy pipeline keep ticking until
+        // engagement registers — fixes "frozen until I walk up to them".
+        if (IsHumanPlayerWithinProximityWake())
+            return PerceptionTier.Audible;
+
         // Player is unaware of this bot and it's peaceful — navigation only
         return PerceptionTier.Occluded;
+    }
+
+    /// <summary>Linear distance (m) from this bot to closest human — uses bot's OtherPlayersData.</summary>
+    private bool IsHumanPlayerWithinProximityWake()
+    {
+        const float wakeMeters = 40f;
+        var gw = GameWorldComponent.Instance;
+        if (gw == null || Bot?.PlayerComponent == null)
+            return false;
+
+        if (gw.PlayerTracker.FindClosestHumanPlayer(out float dist, Bot.PlayerComponent, out _) == null)
+            return false;
+
+        return dist < wakeMeters;
     }
 
     /// <summary>

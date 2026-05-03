@@ -1,6 +1,7 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using EFT;
 using SAIN.Components;
+using SAIN.Plugin;
 using SAIN.SAINComponent.Classes;
 using SAIN.SAINComponent.Classes.EnemyClasses;
 using UnityEngine;
@@ -231,6 +232,31 @@ public static class SAINExternal
         const float TimeSinceUnderFireThreshold = 10f;
 
         reason = ECombatReason.None;
+        if (component?.BotOwner?.Memory == null)
+        {
+            return false;
+        }
+        BotMemoryClass memory = component.BotOwner.Memory;
+        if (memory.IsUnderFire)
+        {
+            reason = ECombatReason.UnderFireNow;
+            return true;
+        }
+        float underFireTime = memory.UnderFireTime;
+        if (underFireTime > 0f && Time.time - underFireTime <= TimeSinceUnderFireThreshold)
+        {
+            reason = ECombatReason.UnderFireRecently;
+            return true;
+        }
+        if (
+            ModDetection.QuestingBotsLoaded
+            && HasQuestingBotsCombatSignals(component, TimeSinceSeenThreshold, TimeSinceHeardThreshold)
+        )
+        {
+            reason = ECombatReason.QuestingBotsThreatSignal;
+            return true;
+        }
+
         Enemy enemy = component?.GoalEnemy;
         if (enemy == null)
         {
@@ -251,16 +277,49 @@ public static class SAINExternal
             reason = ECombatReason.EnemyHeardRecently;
             return true;
         }
-        BotMemoryClass memory = component.BotOwner.Memory;
-        if (memory.IsUnderFire)
+        return false;
+    }
+
+    private static bool HasQuestingBotsCombatSignals(BotComponent component, float seenThreshold, float heardThreshold)
+    {
+        SAINEnemyController enemyController = component?.EnemyController;
+        if (enemyController == null)
         {
-            reason = ECombatReason.UnderFireNow;
+            return false;
+        }
+        if (enemyController.HumanEnemyInLineofSight)
+        {
             return true;
         }
-        if (memory.UnderFireTime + TimeSinceUnderFireThreshold < Time.time)
+        if (enemyController.ActiveHumanEnemy && !enemyController.AtPeace)
         {
-            reason = ECombatReason.UnderFireRecently;
             return true;
+        }
+        if (!enemyController.AtPeace && HasRecentKnownHumanThreat(enemyController, seenThreshold, heardThreshold))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static bool HasRecentKnownHumanThreat(SAINEnemyController enemyController, float seenThreshold, float heardThreshold)
+    {
+        EnemyList knownEnemies = enemyController.KnownEnemies;
+        if (knownEnemies == null || knownEnemies.Humans <= 0)
+        {
+            return false;
+        }
+        for (int i = 0; i < knownEnemies.Count; i++)
+        {
+            Enemy enemy = knownEnemies[i];
+            if (enemy == null || enemy.IsAI)
+            {
+                continue;
+            }
+            if (enemy.IsVisible || enemy.TimeSinceSeen < seenThreshold || enemy.TimeSinceHeard < heardThreshold)
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -273,5 +332,6 @@ public static class SAINExternal
         EnemySeenRecently = 3,
         UnderFireNow = 4,
         UnderFireRecently = 5,
+        QuestingBotsThreatSignal = 6,
     }
 }

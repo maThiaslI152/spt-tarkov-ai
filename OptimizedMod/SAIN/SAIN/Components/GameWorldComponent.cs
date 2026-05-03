@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,6 +8,7 @@ using EFT.InventoryLogic;
 using SAIN.Components.CoverFinder;
 using SAIN.Components.PlayerComponentSpace;
 using SAIN.Helpers;
+using SAIN.Layers.Combat.Squad;
 using SAIN.Plugin;
 using SAIN.Preset.GlobalSettings;
 using UnityEngine;
@@ -336,6 +337,7 @@ public class GameWorldComponent : MonoBehaviour
 
     public void DestroyComponent()
     {
+        SquadCombatCoordinator.ResetCoordinationThrottle();
         Instance = null;
         try
         {

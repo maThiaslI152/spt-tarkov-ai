@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using EFT;
@@ -274,13 +274,15 @@ public class BotComponent : BotComponentBase, ISPlayer
             BotStuck = new SAINBotUnstuckClass(this);
             Hearing = new SAINHearingSensorClass(this);
             Talk = new SAINBotTalkClass(this);
+            // EnemyController must register for ticks before Decision so UpdateEnemies / goal ingest
+            // runs before BotDecisionManager.ChooseEnemy — avoids clearing EFT GoalEnemy while KnownEnemies is stale.
+            EnemyController = new SAINEnemyController(this);
             Decision = new SAINDecisionClass(this);
             Cover = new SAINCoverClass(this);
             SelfActions = new SAINSelfActionClass(this);
             Steering = new SAINSteeringClass(this);
             Grenade = new BotGrenadeManager(this);
             Mover = new SAINMoverClass(this);
-            EnemyController = new SAINEnemyController(this);
             FriendlyFire = new SAINFriendlyFireClass(this);
             Vision = new SAINVisionClass(this);
             Search = new SAINSearchClass(this);

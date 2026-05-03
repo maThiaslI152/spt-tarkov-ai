@@ -115,8 +115,9 @@ public static class AIBrains
         {
             if (_allowedScavBrains == null)
             {
-                // PMC brain is needed for assaultGroup scavs
-                List<EBrain> brains = [EBrain.PMC, .. Scavs];
+                // PMC brain is needed for assaultGroup scavs.
+                // ExUsec is used by Rogues and must be allowed or SAIN can self-disable on those bots.
+                List<EBrain> brains = [EBrain.PMC, EBrain.ExUsec, .. Scavs];
                 _allowedScavBrains = brains.ConvertAll(brain => brain.ToString()).AsReadOnly();
             }
             return _allowedScavBrains;

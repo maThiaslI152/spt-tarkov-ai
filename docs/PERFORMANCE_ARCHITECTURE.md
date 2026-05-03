@@ -10,6 +10,8 @@ This document describes the multi-phase performance optimization applied to SAIN
 
 The core philosophy flips Tarkov's bot-centric AI ("what does this bot need to do?") to player-centric ("what does the player need to experience?"). A bot behind three walls and two floors doesn't need full tactical AI — it just needs to exist convincingly in case the player looks. This cascades through every phase.
 
+**Roadmap and gap analysis (preset budget, visible-vs-off-screen LOD, checklist):** see [AI_BUDGET_LOD_PLAN.md](AI_BUDGET_LOD_PLAN.md).
+
 ---
 
 ## Architecture: How the Systems Fit Together
@@ -21,31 +23,42 @@ Each Frame (16.7ms at 60 FPS)
 │   │
 │   └── AIFrameBudgetScheduler.ProcessFrame(allBots)
 │       │
-│       ├── Phase 0: ResolveOfflineSquadCombat()  [once/sec, sub-0.1ms]
+│       ├── Phase 0: ResolveOfflineSquadCombat()  [≤1 Hz when ≥2 hostile offline squads]
 │       │   └── CombatAudioSpoofer: spoofed gunfire audio
 │       │
-│       ├── Phase 1: Process Visible bots         [full SAIN AI, ~0.5ms each]
-│       ├── Phase 2: Process Audible bots          [movement only, ~0.1ms each]
-│       └── Phase 3: Process Occluded bots         [nav only, ~0.02ms each]
-│           └── Budget hit? → STOP, resume next frame
+│       ├── Visible tier: ProcessTierRoundRobin (budget slice ≈45% of MaxAIBudgetMs first)
+│       ├── Audible tier: ProcessTierRoundRobin (cumulative cap ≈88% before Occluded)
+│       └── Occluded tier: ProcessTierRoundRobin (remaining budget; per-tier resume index)
+│           └── Hard cap MaxAiBudgetMs/frame (preset **Max AI Frame Budget (ms)**, default 2) → STOP; unfinished tiers resume next frame (fair round-robin)
 │
-└── 2ms hard cap GUARANTEED — AI never steals frames
+└── Per-frame AI ms cap — tuned via SAIN preset Global → General → Performance (synced to perf CSV / F12)
 ```
+
+### Performance Logging Improvements (2026-05-03)
+
+`SAINPerformanceMonitor` logging was expanded so short AI stalls are easier to diagnose:
+
+- CSV now includes **`BudgetExhaustedNow`** (per-sample instant flag) in addition to rolling exhaustion percent.
+- CSV now includes **`BudgetHeadroomMs`** (`BudgetLimitMs - BudgetMs`) and **`ProcessedBots` / `SkippedBots`**.
+- Runtime F12 toggling of CSV is now robust: enabling CSV creates writer/header; disabling closes writer.
+- F12 read-only fields now expose headroom, instant exhaustion, and processed/skipped counts.
+
+This helps distinguish “low average budget use” from brief spikes where skipped updates correlate with visible jitter.
 
 ### Key Components
 
 | Component | File | Role |
 |---|---|---|
-| **AIFrameBudgetScheduler** | `SAIN/Components/AIFrameBudgetScheduler.cs` | 2ms hard cap, tiered processing, offline combat dispatch |
-| **SAINAILimit** | `SAIN/Classes/Bot/SAINAILimit.cs` | Perception-tier assignment (Visible/Audible/Occluded) |
-| **BotComponent** | `SAIN/Components/BotComponent.cs` | Per-bot ManualUpdate, ticks only relevant classes per tier |
-| **BotBase** | `SAIN/Classes/Bot/BotBase.cs` | `ShallTick()` gates individual class ticks by interval |
-| **VisionRaycastJob** | `SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs` | Raycast count reduced by LOD tier |
-| **SquadCombatCoordinator** | `SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | Centralized squad target/flanking/suppression |
-| **OfflineCombatResolver** | `SAIN/Components/OfflineCombatResolver.cs` | Statistical AI-vs-AI combat (zero CPU) |
-| **CombatAudioSpoofer** | `SAIN/Components/CombatAudioSpoofer.cs` | Fake gunfire for offline combat |
-| **BotGameObjectPool** | `SAIN/Components/BotGameObjectPool.cs` | Recycle bot GameObjects instead of destroy/create |
-| **BotPoolPatches** | `SAIN/Patches/BotPoolPatches.cs` | Harmony patches intercepting Destroy/Spawn |
+| **AIFrameBudgetScheduler** | `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` | 2ms hard cap, Visible/Audible/Occluded tiers, **time-sliced round-robin** per tier, offline combat dispatch |
+| **SAINAILimit** | `SAIN/SAIN/Classes/Bot/SAINAILimit.cs` | Perception-tier assignment (Visible/Audible/Occluded) |
+| **BotComponent** | `SAIN/SAIN/Components/BotComponent.cs` | Per-bot ManualUpdate, ticks only relevant classes per tier |
+| **BotBase** | `SAIN/SAIN/Classes/Bot/BotBase.cs` | `ShallTick()` gates individual class ticks by interval |
+| **VisionRaycastJob** | `SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs` | Raycast count reduced by LOD tier |
+| **SquadCombatCoordinator** | `SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | Squad leader hook from `CombatSquadLayer` assigns targets / flanking / suppression |
+| **OfflineCombatResolver** | `SAIN/SAIN/Components/OfflineCombatResolver.cs` | Statistical AI-vs-AI combat (budgeted dispatch) |
+| **CombatAudioSpoofer** | `SAIN/SAIN/Components/CombatAudioSpoofer.cs` | Fake gunfire for offline combat |
+| **BotGameObjectPool** | `SAIN/SAIN/Components/BotGameObjectPool.cs` | Recycle bot GameObjects instead of destroy/create |
+| **BotPoolPatches** | `SAIN/SAIN/Patches/BotPoolPatches.cs` | Harmony patches intercepting Destroy/Spawn |
 
 ---
 
@@ -53,7 +66,7 @@ Each Frame (16.7ms at 60 FPS)
 
 ### 1.1 TickInterval Fix
 
-**File:** `SAIN/Classes/Bot/BotBase.cs`  
+**File:** `SAIN/SAIN/Classes/Bot/BotBase.cs`  
 **Change:** Line 70 — `TickInterval` default changed from `0f` to `1f / 30f`
 
 ```csharp
@@ -73,7 +86,7 @@ public float TickInterval { get; set; } = 1f / 30f;  // defaults to 30Hz (~33ms 
 
 ### 1.2 Coroutine Job Throttling
 
-**File:** `SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`  
+**File:** `SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`  
 **Change:** Line 128 — `yield return null` → `yield return wait` in `UpdateEFTVision()`
 
 The coroutine loop created a `WaitForSeconds wait = new(VisionUpdateInterval)` at line 113 but then did `yield return null` at the end of the loop instead of `yield return wait`. This caused the coroutine to resume every frame (via null) instead of respecting the configured interval.
@@ -82,7 +95,7 @@ The coroutine loop created a `WaitForSeconds wait = new(VisionUpdateInterval)` a
 
 ### 1.3 Performance Mode Default
 
-**File:** `SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs`  
+**File:** `SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs`  
 **Change:** Line 12 — `PerformanceMode = true`
 
 This is the master toggle. When `true`, all performance sub-settings activate:
@@ -100,7 +113,7 @@ This is the master toggle. When `true`, all performance sub-settings activate:
 
 ### 2.1 Vision Raycast LOD Reduction
 
-**File:** `SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`  
+**File:** `SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`  
 **Change:** Lines 171-175 — Far tier now uses 1 raycast per body part instead of 2
 
 ```csharp
@@ -124,51 +137,49 @@ Far-tier bots get only LineOfSight. VeryFar/Narnia bots are skipped entirely (li
 
 ### 2.2 AI Frame Budget Scheduler
 
-**File:** `SAIN/Components/AIFrameBudgetScheduler.cs` (NEW)  
-**Wired into:** `BotManagerComponent.ManualUpdate()` at line 101
+**File:** `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs`  
+**Wired into:** `SAIN/SAIN/Components/BotManagerComponent` (`BudgetScheduler.ProcessFrame()` owns the bot loop).
 
 This is the **architectural foundation** — everything else depends on it.
 
-**How it works:**
+**How it works (matches implementation):**
+
+Bots are bucketed by `BotComponent.CurrentPerceptionTier`, combat-sorted inside each list, then **`ProcessTierRoundRobin`** walks each tier from a **resume index** until that tier’s phase budget or the global **2ms** cap is exhausted.
 
 ```csharp
 public void ProcessFrame(HashSet<BotComponent> allBots, float currentTime, float deltaTime)
 {
-    _frameTimer.Restart();  // Start stopwatch
+    _frameTimer.Restart();
+    // Phase 0: offline squad combat (≤1 Hz when squads registered)
+    // Build visibleBots / audibleBots / occludedBots …
+    double visiblePhaseStopMs = MaxAIBudgetMs * 0.45;   // VisibleTierBudgetFraction
+    double audiblePhaseStopMs = MaxAIBudgetMs * 0.88;   // AudibleTierCumulativeFraction
 
-    // Phase 0: Offline combat (once per second, statistical model)
-    ResolveOfflineSquadCombat(currentTime);
-
-    // Phase 1: Visible bots — MUST complete (player is watching)
-    foreach (var bot in visibleBots) {
-        if (_frameTimer.ElapsedMs >= 2.0f) return;  // HARD STOP
-        bot.ManualUpdate(currentTime, deltaTime);
-    }
-
-    // Phase 2: Audible bots — process what fits
-    // Phase 3: Occluded bots — leftover budget, round-robin
+    ProcessTierRoundRobin(visibleBots, ref _resumeVisibleIndex, visiblePhaseStopMs, currentTime, deltaTime);
+    if (_frameTimer.Elapsed.TotalMilliseconds < MaxAIBudgetMs)
+        ProcessTierRoundRobin(audibleBots, ref _resumeAudibleIndex, audiblePhaseStopMs, currentTime, deltaTime);
+    if (_frameTimer.Elapsed.TotalMilliseconds < MaxAIBudgetMs)
+        ProcessTierRoundRobin(occludedBots, ref _resumeOccludedIndex, MaxAIBudgetMs, currentTime, deltaTime);
 }
 ```
 
 **Key guarantees:**
-- AI processing NEVER exceeds 2ms per frame
-- Visible bots always get full AI (highest priority)
-- Audible bots get movement + basics when budget allows
-- Occluded bots get navigation only, spread across frames with resume index
-- When 2ms is exhausted, remaining bots wait until subsequent frames
-- `BudgetExhaustedLastFrame` tracks backpressure for diagnostics
+- AI processing NEVER exceeds **MaxAIBudgetMs** (default **2ms**) per frame.
+- Visible tier is processed first with its **own phase ceiling** (~45% of the budget) so Audible bots still get ticks when many Visible bots exist (prevents starvation loops).
+- Audible then Occluded tiers run under cumulative caps; unfinished work **round-robins** across frames via `_resume*Index`.
+- `BudgetExhaustedLastFrame` tracks backpressure for diagnostics.
 
 **Proven pattern:** STALKER Anomaly's Warfare mode handles 50+ squads and hundreds of NPCs at 60 FPS using identical budget-time architecture.
 
 **How to use:**
-- The scheduler is automatically wired via `BotManagerComponent.Activate()` (line 89)
-- No configuration needed — 2ms budget is hard-coded (STALKER-proven value)
-- Check `BudgetExhaustedLastFrame` for diagnostics during profiling
+- The scheduler is wired when `BotManagerComponent` constructs `BudgetScheduler` during activation.
+- Default budget is **2ms** (STALKER-proven target); tier fractions are constants in `AIFrameBudgetScheduler`.
+- Check `BudgetExhaustedLastFrame` for diagnostics during profiling.
 
 ### 2.5 Perception-Based AI LOD
 
-**File:** `SAIN/Classes/Bot/SAINAILimit.cs` (rewritten)  
-**Enum:** `SAIN/SAINEnum.cs` — `PerceptionTier` (Visible, Audible, Occluded)
+**File:** `SAIN/SAIN/Classes/Bot/SAINAILimit.cs` (rewritten)  
+**Enum:** `SAIN/SAIN/SAINEnum.cs` — `PerceptionTier` (Visible, Audible, Occluded)
 
 **The old behavior (bot-centric):**
 ```csharp
@@ -221,8 +232,8 @@ Implemented in `BotComponent.ManualUpdate()` lines 189-220.
 ### 2.5 (continued): Offline Combat Resolution
 
 **Files:**
-- `SAIN/Components/OfflineCombatResolver.cs` (NEW) — statistical combat model
-- `SAIN/Components/CombatAudioSpoofer.cs` (NEW) — spoofed gunfire audio
+- `SAIN/SAIN/Components/OfflineCombatResolver.cs` — statistical combat model
+- `SAIN/SAIN/Components/CombatAudioSpoofer.cs` — spoofed gunfire audio
 
 **How offline combat works:**
 
@@ -297,7 +308,7 @@ Is bot in offline squad?
 
 ### 3.1 Shared Squad Awareness
 
-**Files:** `SAIN/Classes/BotManager/Squad.cs`, `SAIN/Classes/Bot/EnemyControllers/SAINEnemyController.cs`
+**Files:** `SAIN/SAIN/Classes/BotManager/Squad.cs`, `SAIN/SAIN/Classes/Bot/EnemyControllers/SAINEnemyController.cs`
 
 **The problem:** Each bot in a squad independently runs per-body-part raycasts to detect enemies (O(N²) visibility cost).
 
@@ -325,7 +336,7 @@ Bot A sees Enemy X → EnemyAdded → PropagateSquadEnemyDetection
 
 ### 3.2 Squad Combat Coordinator
 
-**File:** `SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` (NEW)  
+**File:** `SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs`  
 **Wired into:** `CombatSquadLayer.IsActive()` at line 66
 
 **The problem:** Each squad member independently evaluates full personality-driven combat decisions (target selection, flanking, suppression).
@@ -351,35 +362,30 @@ SquadCombatCoordinator.CoordinateSquad(leaderBot, decisions)
           └── Closest engages directly, others search/flank
 ```
 
-**How to use:** Automatic for any bot in a squad with ≥2 members. The squad leader `Bot.Squad.IAmLeader` triggers coordination in `CombatSquadLayer.IsActive()`.
+**How to use:** Automatic for any bot in a squad with ≥2 members. The squad leader `Bot.Squad.IAmLeader` triggers coordination in `CombatSquadLayer.IsActive()`. Members in **`DogFight`** are skipped when assigning squad decisions so solo combat is not overwritten. **`SquadCombatCoordinator.ResetCoordinationThrottle()`** runs from **`GameWorldComponent.DestroyComponent()`** so throttle keys do not leak across raids.
 
 ### 3.3 BigBrain State Tree Migration
 
-**File:** `SAIN/Layers/SAINLayer.cs`
+**File:** `SAIN/SAIN/Layers/SAINLayer.cs` — optional `CheckIsActiveWithCache(Func<bool> computeUncached)` helper (BigBrain still queries layers each tick unless upstream behavior changes)
 
 **The problem:** BigBrain's `ShallUseNow()` evaluates ALL custom layers every tick (Behavior Tree pattern). Based on StraySpark profiling: Behavior Tree = 0.042ms/tick/agent, State Tree = 0.011ms/tick/agent (4x reduction).
 
-**The solution:** Added `CheckIsActiveWithCache()` to SAINLayer — inactive layers throttled to 5Hz.
+**The solution:** Throttle **inactive** layer checks: pass a lambda that performs the real `IsActive` predicate **without** calling `IsActive()` (avoids infinite recursion). **ExtractLayer** and **CombatSoloLayer** use this (`CombatSoloLayer` sets `IsActiveCheckInterval = 1/30` for tighter pickup); others still evaluate every tick.
 
 ```csharp
-protected bool CheckIsActiveWithCache()
+protected bool CheckIsActiveWithCache(Func<bool> computeUncached)
 {
-    bool isCurrentlyActive = _cachedIsActive;
-
-    // Active layer: check every frame (transitions only)
-    if (isCurrentlyActive)
-        return _cachedIsActive = IsActive();
-
-    // Inactive layer: throttle to 5Hz
+    if (_cachedIsActive)
+        return _cachedIsActive = computeUncached();
     if (Time.time - _lastIsActiveCheckTime >= IsActiveCheckInterval) {
         _lastIsActiveCheckTime = Time.time;
-        _cachedIsActive = IsActive();
+        _cachedIsActive = computeUncached();
     }
     return _cachedIsActive;
 }
 ```
 
-**How to use:** Subclass layers that implement expensive `IsActive()` checks should call `CheckIsActiveWithCache()` instead of checking directly. Override `IsActiveCheckInterval` to adjust throttle rate (default 0.2s = 5Hz).
+**How to use:** Call `ResetIsActiveEvaluationCache()` when short-circuiting (e.g. bot inactive). Override `IsActiveCheckInterval` to adjust throttle (default 0.2s ≈ 5Hz).
 
 ---
 
@@ -388,8 +394,8 @@ protected bool CheckIsActiveWithCache()
 ### 4.1 Bot Pool System
 
 **Files:**
-- `SAIN/Components/BotGameObjectPool.cs` (NEW) — pool manager
-- `SAIN/Patches/BotPoolPatches.cs` (NEW) — Harmony interceptors
+- `SAIN/SAIN/Components/BotGameObjectPool.cs` — pool manager
+- `SAIN/SAIN/Patches/BotPoolPatches.cs` — Harmony interceptors
 
 **The problem:** Every bot death triggers `GameObject.Destroy()` (GC spike). Every spawn triggers `GameObject.Instantiate()` (allocation spike). On Lighthouse with 29 bots and multiple waves, this creates constant stutter.
 
@@ -543,12 +549,12 @@ bot.TickInterval             // 1/30f, 1/10f, or 1/5f depending on tier
 
 | File | Phase |
 |---|---|
-| `SAIN/Components/AIFrameBudgetScheduler.cs` | 2.2 |
-| `SAIN/Components/OfflineCombatResolver.cs` | 2.5 |
-| `SAIN/Components/CombatAudioSpoofer.cs` | 2.5 |
-| `SAIN/Components/BotGameObjectPool.cs` | 4.1 |
-| `SAIN/Patches/BotPoolPatches.cs` | 4.1 |
-| `SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | 3.2 |
+| `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` | 2.2 |
+| `SAIN/SAIN/Components/OfflineCombatResolver.cs` | 2.5 |
+| `SAIN/SAIN/Components/CombatAudioSpoofer.cs` | 2.5 |
+| `SAIN/SAIN/Components/BotGameObjectPool.cs` | 4.1 |
+| `SAIN/SAIN/Patches/BotPoolPatches.cs` | 4.1 |
+| `SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | 3.2 |
 
 ### Modified SAIN Files (16)
 
@@ -565,7 +571,7 @@ bot.TickInterval             // 1/30f, 1/10f, or 1/5f depending on tier
 | `Components/BotComponent.cs` | PerceptionTier property, tier-based tick skipping, ResetForPoolRecycle |
 | `Components/BotManagerComponent.cs` | Budget scheduler wiring |
 | `Components/GameWorldComponent.cs` | Pool cleanup on raid end |
-| `Layers/SAINLayer.cs` | CheckIsActiveWithCache (State Tree) |
+| `SAIN/SAIN/Layers/SAINLayer.cs` | CheckIsActiveWithCache(Func) + Extract/Solo layers |
 | `Layers/Combat/Squad/CombatSquadLayer.cs` | SquadCombatCoordinator integration |
 | `Preset/.../PerformanceSettings.cs` | PerformanceMode=true |
 | `SAINEnum.cs` | PerceptionTier enum |
