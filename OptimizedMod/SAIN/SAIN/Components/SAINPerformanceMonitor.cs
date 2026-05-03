@@ -27,7 +27,7 @@ public class SAINPerformanceMonitor : MonoBehaviour
     public int TotalOnlineBots => VisibleBots + AudibleBots + OccludedBots;
 
     public float BudgetUsedMs { get; private set; }
-    public float BudgetLimitMs { get; private set; } = 2.0f;
+    public float BudgetLimitMs { get; set; } = 2.0f;
     public float BudgetUtilizationPercent => BudgetLimitMs > 0f ? (BudgetUsedMs / BudgetLimitMs * 100f) : 0f;
 
     public int BotsProcessedThisFrame { get; private set; }
@@ -59,6 +59,7 @@ public class SAINPerformanceMonitor : MonoBehaviour
     public float LogIntervalSeconds { get; set; } = 5f;
     public bool LogToCSV { get; set; } = true;
     public bool VerboseLogging { get; set; }
+    public bool DiagnosticLogging { get; set; }  // Spammy: tier changes, budget exhaustion, offline combat per event
     public bool DumpStatsRequested { get; set; }
 
     // ── Internal state ────────────────────────────────────────────────────────
@@ -136,26 +137,23 @@ public class SAINPerformanceMonitor : MonoBehaviour
         var scheduler = AIFrameBudgetScheduler.Instance;
         if (scheduler == null) return;
 
-        _frameTimer.Restart();
-
-        // Read tier counts directly from scheduler (no reflection)
+        // Read tier counts and budget stats directly from scheduler
         VisibleBots = scheduler.VisibleBotsLastFrame;
         AudibleBots = scheduler.AudibleBotsLastFrame;
         OccludedBots = scheduler.OccludedBotsLastFrame;
         OfflineSquadCount = scheduler.OfflineSquadCount;
+        BotsProcessedThisFrame = scheduler.BotsProcessedThisFrame;
+        BotsSkippedThisFrame = scheduler.BotsSkippedThisFrame;
+        BudgetExhaustedThisFrame = scheduler.BudgetExhaustedLastFrame;
 
-        BudgetUsedMs = (float)_frameTimer.Elapsed.TotalMilliseconds;
+        // Read actual AI processing time from scheduler's Stopwatch
+        BudgetUsedMs = (float)scheduler.BudgetElapsedMs;
         _avgBudgetMs.Add(BudgetUsedMs);
         _avgBudgetUtilization.Add(BudgetUtilizationPercent);
 
-        if (BudgetUsedMs >= BudgetLimitMs)
+        if (BudgetExhaustedThisFrame)
         {
-            BudgetExhaustedThisFrame = true;
             _budgetExhaustedFrameCount++;
-        }
-        else
-        {
-            BudgetExhaustedThisFrame = false;
         }
     }
 

@@ -1,7 +1,7 @@
 # Mod Integration — SPT Tarkov AI Optimization
 
-> This document maps how the AI mods in this workspace interoperate. It is designed to be
-> extensible — as new mods are added, their integration points can be appended.
+> **Code location:** All source code lives in `OptimizedMod/`. File paths in this document use original mod names for clarity — actual files are under `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.  
+> This document maps how the AI mods in this workspace interoperate. It is designed to be extensible — as new mods are added, their integration points can be appended.
 
 ---
 
@@ -301,7 +301,7 @@ SAIN uses `BrainManager` for:
 
 ### Compatibility Guarantees
 
-From `SAIN_AI_PERFORMANCE.md`, SAIN's optimizations are designed to be compatible with
+From the performance optimization architecture (`PERFORMANCE_ARCHITECTURE.md`), SAIN's optimizations are designed to be compatible with
 BigBrain:
 
 

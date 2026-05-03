@@ -1,50 +1,53 @@
 ---
+
 name: sain-performance-optimization
 overview: Multi-phase optimization across the entire forked mod stack. Architectural foundation: AI frame budget scheduler (STALKER-proven, 2ms hard cap). Core philosophy: player-centric design — don't simulate what the player can't see. Fake it when unseen, compute only what the player experiences. Progresses from mechanical fixes (Phase 1) through structural improvements (Phase 2), visibility-based AI LOD + offline combat resolution (Phase 2.5), squad-level collapse (Phase 3), to Call of Duty-style bot GameObject recycling (Phase 4). All mods forked — full source control. Target: Lighthouse 29+ bots at 60 FPS.
 todos:
-  - id: phase1-tickinterval
-    content: "Phase 1.1: Fix TickInterval default in BotBase.cs from 0f to 1f/30f (1-line change, cascading effect across ~16 classes)"
-    status: completed
-  - id: phase1-coroutines
-    content: "Phase 1.2: Replace 16 yield-return-null with WaitForSeconds in 6 coroutine job files"
-    status: completed
-  - id: phase1-config
-    content: "Phase 1.3: Enable AILimit + SAIN Performance Mode preset (configuration-only, no code changes)"
-    status: completed
-  - id: phase2-vision-lod
-    content: "Phase 2.1: Add LOD-tier-based raycast reduction in VisionRaycastJob.cs (3 checks -> 1 for Far+ tiers)"
-    status: completed
-  - id: phase2-jobmanager
-    content: "Phase 2.2: Implement AI frame budget scheduler — guaranteed hard cap on AI processing time per frame (2ms target), priority-based bot processing within budget, STALKER-proven architecture"
-    status: completed
-  - id: phase2.5-visibility-lod
-    content: "Phase 2.5: Implement visibility-based AI LOD + offline combat resolution (SMART terrain pattern) — replace pure-distance AILimit with player-can-see/can-hear occlusion-aware throttling, resolve AI-vs-AI combat statistically using bot equipment/level stats"
-    status: completed
-  - id: phase3-squad-awareness
-    content: "Phase 3.1: Implement shared squad awareness via TalkClass bypass (propagate enemy detection without redundant per-bot raycasts)"
-    status: completed
-  - id: phase3-squad-collapse
-    content: "Phase 3.2: Push target distribution, flanking, and suppression decisions to CombatSquadLayer (squad coordinator pattern)"
-    status: completed
-  - id: phase3-bigbrain-st
-    content: "Phase 3.3: Migrate BigBrain layer evaluation from all-layers-every-tick to active-layer-plus-transitions-only (State Tree pattern)"
-    status: completed
-  - id: phase4-objectpool
-    content: "Phase 4.1: Implement bot GameObject pool/recycle system — intercept EFT destroy/spawn via Harmony, pool BotOwner GameObjects instead of destroying/recreating"
-    status: completed
-  - id: phase4-pool-sain
-    content: "Phase 4.2: Wire pool recycle events through SAIN BotComponent + LootingBots LootingBrain reset paths"
-    status: completed
-  - id: profile-baseline
-    content: "Capture baseline profiling data before any changes using SAIN logging + BepInEx.FPSCounter"
-    status: pending
-  - id: f12-perf-monitor
-    content: "NEW: SAINPerformanceMonitor — F12-accessible real-time stats, CSV performance logging to BepInEx/LogOutput/sain_perf.csv, Dump Stats button, read-only config entries for FPS/budget/bot distribution"
-    status: completed
-  - id: audio-spoofer-wiring
-    content: "Phase 2.5: Wire CombatAudioSpoofer to EFT BetterAudio (placeholder ready, needs SPT runtime to locate AudioClip assets by weapon template)"
-    status: pending
+
+- id: phase1-tickinterval
+content: "Phase 1.1: Fix TickInterval default in BotBase.cs from 0f to 1f/30f (1-line change, cascading effect across ~16 classes)"
+status: completed
+- id: phase1-coroutines
+content: "Phase 1.2: Replace 16 yield-return-null with WaitForSeconds in 6 coroutine job files"
+status: completed
+- id: phase1-config
+content: "Phase 1.3: Enable AILimit + SAIN Performance Mode preset (configuration-only, no code changes)"
+status: completed
+- id: phase2-vision-lod
+content: "Phase 2.1: Add LOD-tier-based raycast reduction in VisionRaycastJob.cs (3 checks -> 1 for Far+ tiers)"
+status: completed
+- id: phase2-jobmanager
+content: "Phase 2.2: Implement AI frame budget scheduler — guaranteed hard cap on AI processing time per frame (2ms target), priority-based bot processing within budget, STALKER-proven architecture"
+status: completed
+- id: phase2.5-visibility-lod
+content: "Phase 2.5: Implement visibility-based AI LOD + offline combat resolution (SMART terrain pattern) — replace pure-distance AILimit with player-can-see/can-hear occlusion-aware throttling, resolve AI-vs-AI combat statistically using bot equipment/level stats"
+status: completed
+- id: phase3-squad-awareness
+content: "Phase 3.1: Implement shared squad awareness via TalkClass bypass (propagate enemy detection without redundant per-bot raycasts)"
+status: completed
+- id: phase3-squad-collapse
+content: "Phase 3.2: Push target distribution, flanking, and suppression decisions to CombatSquadLayer (squad coordinator pattern)"
+status: completed
+- id: phase3-bigbrain-st
+content: "Phase 3.3: Migrate BigBrain layer evaluation from all-layers-every-tick to active-layer-plus-transitions-only (State Tree pattern)"
+status: completed
+- id: phase4-objectpool
+content: "Phase 4.1: Implement bot GameObject pool/recycle system — intercept EFT destroy/spawn via Harmony, pool BotOwner GameObjects instead of destroying/recreating"
+status: completed
+- id: phase4-pool-sain
+content: "Phase 4.2: Wire pool recycle events through SAIN BotComponent + LootingBots LootingBrain reset paths"
+status: completed
+- id: profile-baseline
+content: "Capture baseline profiling data before any changes using SAIN logging + BepInEx.FPSCounter"
+status: pending
+- id: f12-perf-monitor
+content: "NEW: SAINPerformanceMonitor — F12-accessible real-time stats, CSV performance logging to BepInEx/LogOutput/sain_perf.csv, Dump Stats button, read-only config entries for FPS/budget/bot distribution"
+status: completed
+- id: audio-spoofer-wiring
+content: "Phase 2.5: Wire CombatAudioSpoofer to EFT BetterAudio (placeholder ready, needs SPT runtime to locate AudioClip assets by weapon template)"
+status: pending
 isProject: false
+
 ---
 
 # SAIN Performance Optimization Plan
@@ -71,13 +74,15 @@ Independent of player perception          If NO → fake it, skip expensive work
 
 This principle cascades through every phase:
 
-| Phase | Bot-Centric (What We Stop Doing) | Player-Centric (What We Do Instead) |
-|---|---|---|
-| **1** | Tick every class every frame (bots "need" constant updates) | Default to 30Hz, only tick faster when player is engaged |
-| **2** | LOD based on distance from bot | LOD based on distance from player's camera |
-| **2.5** | Full AI for all bots regardless of walls | Visibility + audibility gating: occluded bots get minimal processing |
-| **3** | Each squad member computes independently | One squad coordinator decides, members execute simplified orders |
-| **4** | Destroy/create GameObjects on death/spawn | Recycle and reset — the same "actor" plays a new role |
+
+| Phase   | Bot-Centric (What We Stop Doing)                            | Player-Centric (What We Do Instead)                                  |
+| ------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
+| **1**   | Tick every class every frame (bots "need" constant updates) | Default to 30Hz, only tick faster when player is engaged             |
+| **2**   | LOD based on distance from bot                              | LOD based on distance from player's camera                           |
+| **2.5** | Full AI for all bots regardless of walls                    | Visibility + audibility gating: occluded bots get minimal processing |
+| **3**   | Each squad member computes independently                    | One squad coordinator decides, members execute simplified orders     |
+| **4**   | Destroy/create GameObjects on death/spawn                   | Recycle and reset — the same "actor" plays a new role                |
+
 
 ## Architectural Foundation: AI Frame Budget (What STALKER Proves at Scale)
 
@@ -165,6 +170,7 @@ Every other technique in this plan produces variable savings. Perception tiering
 **STALKER's proof:** Warfare mode processes 50+ squads, hundreds of NPCs, and complex faction logic — all on potato hardware at 60 FPS. The AI system NEVER uses more than its allocated budget. SPT can and should do exactly the same thing.
 
 The 2ms budget is a design target based on the 16.7ms frame budget at 60 FPS:
+
 - 2ms for AI (our target)
 - Remaining 14.7ms for rendering, physics, networking, and everything else
 - Matches STALKER's proven allocation
@@ -175,11 +181,13 @@ The 2ms budget is a design target based on the 16.7ms frame budget at 60 FPS:
 
 There's a fundamental tension in SPT that no current mod setup resolves:
 
-| | Live Tarkov (BSG Servers) | SPT + SAIN (Local CPU) | SPT Vanilla AI |
-|---|---|---|---|
-| **Bot count per map** | 20-48 (varies by map) | Practical: 5-8 at decent FPS | Can handle more, but... |
-| **AI quality** | High (server-side, optimized) | Very high (SAIN: tactical, realistic) | Low (simple patrol + shoot) |
-| **Bottleneck** | None (dedicated servers) | Single player CPU | Not bottlenecked by AI quality |
+
+|                       | Live Tarkov (BSG Servers)     | SPT + SAIN (Local CPU)                | SPT Vanilla AI                 |
+| --------------------- | ----------------------------- | ------------------------------------- | ------------------------------ |
+| **Bot count per map** | 20-48 (varies by map)         | Practical: 5-8 at decent FPS          | Can handle more, but...        |
+| **AI quality**        | High (server-side, optimized) | Very high (SAIN: tactical, realistic) | Low (simple patrol + shoot)    |
+| **Bottleneck**        | None (dedicated servers)      | Single player CPU                     | Not bottlenecked by AI quality |
+
 
 **The problem:** SAIN chose **quality over quantity**. It makes bots behave like real players — full vision raycasts, cover finding, tactical decisions, squad coordination, personality-driven behavior. Beautiful AI. But it costs so much CPU that you can only run 5-8 bots on a Ryzen 5 5600 at acceptable FPS.
 
@@ -196,6 +204,7 @@ Gap: 5x more bots at 4x higher FPS = 20x improvement needed
 **How "fake it when unseen" solves this:**
 
 The key insight: the player only experiences a fraction of the AI on the map at any moment. Lighthouse with 30+ bots might have:
+
 - 3-4 bots in the player's direct vicinity (visible or fighting) → need SAIN-quality
 - 5-8 bots the player can hear (footsteps, distant gunfire) → need movement + basic reactions
 - 15-20 bots the player is completely unaware of → just need to exist, move along objectives
@@ -212,15 +221,17 @@ By tiering AI quality to player perception (and moving some bots entirely offlin
 
 Lighthouse is the hardest map because of its diverse boss ecosystem:
 
-| AI Type | Count | Behavior | Current SAIN Cost |
-|---|---|---|---|
-| Rogues (Water Treatment) | 4-12 | Coordinated defense, mounted weapons, patrols | Full AI per bot |
-| Goons (Knight, Big Pipe, Birdeye) | 3 | Coordinated 3-boss squad, flanking tactics | Full AI per bot |
-| Zryachiy + Cultist guards (Island) | 1-3 | Island defense, cultist behavior | Full AI per bot |
-| Partisan (loitering) | 1 | Roaming, ambush behavior | Full AI |
-| PMCs | 8-12 | Full SAIN tactical AI | Full AI per bot |
-| Scavs | 5-10 | Patrol, loot, fight | Full AI per bot |
-| **Total** | **22-41** | | **All at full quality → impossible** |
+
+| AI Type                            | Count     | Behavior                                      | Current SAIN Cost                    |
+| ---------------------------------- | --------- | --------------------------------------------- | ------------------------------------ |
+| Rogues (Water Treatment)           | 4-12      | Coordinated defense, mounted weapons, patrols | Full AI per bot                      |
+| Goons (Knight, Big Pipe, Birdeye)  | 3         | Coordinated 3-boss squad, flanking tactics    | Full AI per bot                      |
+| Zryachiy + Cultist guards (Island) | 1-3       | Island defense, cultist behavior              | Full AI per bot                      |
+| Partisan (loitering)               | 1         | Roaming, ambush behavior                      | Full AI                              |
+| PMCs                               | 8-12      | Full SAIN tactical AI                         | Full AI per bot                      |
+| Scavs                              | 5-10      | Patrol, loot, fight                           | Full AI per bot                      |
+| **Total**                          | **22-41** |                                               | **All at full quality → impossible** |
+
 
 **Two specific SAIN behaviors that waste CPU:**
 
@@ -228,11 +239,13 @@ Lighthouse is the hardest map because of its diverse boss ecosystem:
 2. **AI-vs-AI combat simulation:** When PMCs fight Scavs (or Rogues fight PMCs) far from the player, SAIN fully simulates the combat — vision, cover, tactics, shooting — for immersion's sake. Great intent, but the player only hears distant gunfire. They don't need to see the flanking maneuver.
 
 **Both can be faked:**
+
 - Bosses far from player: reduce to movement + basic pathfinding only
 - AI-vs-AI combat far from player: skip full combat simulation, just produce gunfire audio + move bots around the engagement zone, occasionally "kill" one probabilistically
 - When the player approaches: switch those bots to full SAIN quality seamlessly
 
 ## Problem
+
 SPT runs all bot AI locally on the player's CPU. Even 5-6 fighting bots drops to ~15 FPS (20ms frame time, exceeding the 16.7ms budget). SAIN is the primary bottleneck: ~16 of 18 bot classes tick every frame needlessly, and 16 `yield return null` in coroutine jobs resume per-frame regardless of configured intervals.
 
 ## Phased Approach
@@ -240,27 +253,32 @@ SPT runs all bot AI locally on the player's CPU. Even 5-6 fighting bots drops to
 ### Phase 1: Mechanical Fixes (highest impact-to-effort)
 
 **1. Fix TickInterval defaults in BotBase.cs**
+
 - Root cause: `TickInterval` defaults to `0f`, so `ShallTick()` always returns true
 - Change: Set `TickInterval = 1f / 30f` (30Hz default) at [SAIN/SAIN/Classes/Bot/BotBase.cs line 71](SAIN/SAIN/Classes/Bot/BotBase.cs)
 - Impact: ~16 classes stop ticking every frame
 
 **2. Throttle inner coroutine yields (6 job files)**
+
 - 16 `yield return null` across 6 files: VisionRaycastJob.cs (4), EnemyPlaceRaycastJob.cs (6), DirectionDataJob.cs (1), FlashlightRaycastJob.cs (2), RandomVisiblePointGeneratorJob.cs (1), EnemyPathVisibilityRaycastJob.cs (2)
 - Change: Replace `yield return null` with cached `WaitForSeconds` matching outer loop
 - Impact: Eliminates per-frame coroutine resumes
 
 **3. Enable AILimit + SAIN Performance Mode**
+
 - Configuration-only: Set SAIN's AI Limit tier system + SPT-AILimit bot deactivation
 - Impact: 50%+ CPU reduction on distant bots without code changes
 
 ### Phase 2: Structural Improvements
 
 **4. LOD-tier raycast reduction in VisionRaycastJob.cs**
+
 - SAIN's `AILimitSetting` (None/Far/VeryFar/Narnia) already exists but doesn't reduce raycast count
 - Change: Drop from 3 raycasts per body part to 1 for Far+ tiers
 - Impact: Proportional savings at distance
 
 **5. Implement AI frame budget scheduler (Foundation)**
+
 - Currently SAIN has no time budget — processes all bots, FPS crashes
 - Change: Create `AIFrameBudgetScheduler.cs` with 2ms hard cap, tiered priority processing (Visible → Audible → Occluded)
 - This is the **first structural change to build** — everything else depends on it
@@ -287,12 +305,14 @@ This phase replaces pure-distance AILimit with **perception-gated computation**:
 
 The bot asks "how far am I?" — not "does the player know I exist?"
 
-| Scenario | Distance | Bot-Centric Result | Player-Centric Reality |
-|---|---|---|---|
-| Bot behind 3 walls, 2 floors (Dorms) | 30m | FULL AI | Player can't see OR hear them — fake everything |
-| Bot in open field with scope line | 200m | THROTTLED | Player can see them — need convincing behavior |
-| Bot footsteps in adjacent room | 15m | FULL AI | Player hears but doesn't see — need position + movement, not tactics |
-| Bot sprinting on floor above | 10m | FULL AI | Player hears — same as above |
+
+| Scenario                             | Distance | Bot-Centric Result | Player-Centric Reality                                               |
+| ------------------------------------ | -------- | ------------------ | -------------------------------------------------------------------- |
+| Bot behind 3 walls, 2 floors (Dorms) | 30m      | FULL AI            | Player can't see OR hear them — fake everything                      |
+| Bot in open field with scope line    | 200m     | THROTTLED          | Player can see them — need convincing behavior                       |
+| Bot footsteps in adjacent room       | 15m      | FULL AI            | Player hears but doesn't see — need position + movement, not tactics |
+| Bot sprinting on floor above         | 10m      | FULL AI            | Player hears — same as above                                         |
+
 
 **The fix: perception-gated computation.**
 
@@ -313,19 +333,23 @@ enum PerceptionTier
 
 **What gets faked at each tier:**
 
-| Tier | What's Real | What's Faked |
-|---|---|---|
-| **Visible** | Everything — vision, cover, tactics, shooting, movement | Nothing — player is watching, bot must perform |
-| **Audible** | Position, patrol path, fire-if-shot-at | Vision checks (no player to check against), cover finding, tactical decisions, inventory management |
-| **Occluded** | Patrol path navigation only | Everything else — vision, cover, tactics, combat, squad coordination |
+
+| Tier         | What's Real                                             | What's Faked                                                                                        |
+| ------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Visible**  | Everything — vision, cover, tactics, shooting, movement | Nothing — player is watching, bot must perform                                                      |
+| **Audible**  | Position, patrol path, fire-if-shot-at                  | Vision checks (no player to check against), cover finding, tactical decisions, inventory management |
+| **Occluded** | Patrol path navigation only                             | Everything else — vision, cover, tactics, combat, squad coordination                                |
+
 
 **Tick frequency per tier:**
 
+
 | Perception Tier | Vision | Decision | Cover | Movement | Total CPU per bot |
-|---|---|---|---|---|---|
-| **Visible** | 30Hz | 30Hz | 10Hz | 30Hz | Full (~0.5ms) |
-| **Audible** | 5Hz | 5Hz | skip | 10Hz | Reduced (~0.1ms) |
-| **Occluded** | 2Hz | 2Hz | skip | 5Hz | Minimal (~0.02ms) |
+| --------------- | ------ | -------- | ----- | -------- | ----------------- |
+| **Visible**     | 30Hz   | 30Hz     | 10Hz  | 30Hz     | Full (~0.5ms)     |
+| **Audible**     | 5Hz    | 5Hz      | skip  | 10Hz     | Reduced (~0.1ms)  |
+| **Occluded**    | 2Hz    | 2Hz      | skip  | 5Hz      | Minimal (~0.02ms) |
+
 
 **Audibility detection (no raycasts, zero-cost):**
 
@@ -343,11 +367,13 @@ enum PerceptionTier
 
 **Key files:**
 
-| File | Change |
-|---|---|
+
+| File                                                                                   | Change                                                                                       |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | [SAIN/SAIN/SAIN/Classes/Bot/SAINAILimit.cs](SAIN/SAIN/SAIN/Classes/Bot/SAINAILimit.cs) | Replace `CheckDistances()` with `CheckPerception()` — player-centric visibility + audibility |
-| [SAIN/SAIN/SAIN/Classes/Bot/BotBase.cs](SAIN/SAIN/SAIN/Classes/Bot/BotBase.cs) | Wire `TickInterval` to perception tier (Visible=30Hz, Audible=10Hz, Occluded=5Hz) |
-| [SAIN/SAIN/SAIN/Components/BotComponent.cs](SAIN/SAIN/SAIN/Components/BotComponent.cs) | Skip entire tick groups when perception tier doesn't warrant them |
+| [SAIN/SAIN/SAIN/Classes/Bot/BotBase.cs](SAIN/SAIN/SAIN/Classes/Bot/BotBase.cs)         | Wire `TickInterval` to perception tier (Visible=30Hz, Audible=10Hz, Occluded=5Hz)            |
+| [SAIN/SAIN/SAIN/Components/BotComponent.cs](SAIN/SAIN/SAIN/Components/BotComponent.cs) | Skip entire tick groups when perception tier doesn't warrant them                            |
+
 
 **Why this works for Tarkov's map design:**
 
@@ -381,6 +407,7 @@ SPT-AILimit handles extreme range (>200m) via `GameObject.SetActive(false)` — 
 SAIN currently processes bosses at full AI regardless of distance. This is intentional — bosses are special, they drive map narrative. But on Lighthouse, this means the Goons (3 bosses) + Zryachiy/Cultists (1-3) + Partisan (1) + Rogues (4-12) = 9-19 bots running full AI even when the player is on the opposite side of the map.
 
 Fix: Remove the boss exemption from `SAINAILimit.CheckDistances()`. Bosses follow the same perception tiers as regular bots:
+
 - Player can't see/hear the Goons → minimal processing
 - Player approaches Chalet area → Goons switch to full AI
 - Bosses remain "special" only in their *behavior complexity when visible*, not in their *CPU budget allocation*
@@ -391,11 +418,11 @@ When PMCs fight Scavs or Rogues fight PMCs far from the player, SAIN fully simul
 
 1. **Detect AI-vs-AI engagement** (bots shooting at bots, not player)
 2. **If player can't see the combat zone:**
-   - Skip vision/cover/tactical computation for both sides
-   - Produce gunfire audio (spoof shots, no real bullet simulation)
-   - Move bots around the engagement zone randomly
-   - Probabilistically "kill" one side after N seconds (weighted by bot type/power)
-   - Notify LootingBots of new corpse if applicable
+  - Skip vision/cover/tactical computation for both sides
+  - Produce gunfire audio (spoof shots, no real bullet simulation)
+  - Move bots around the engagement zone randomly
+  - Probabilistically "kill" one side after N seconds (weighted by bot type/power)
+  - Notify LootingBots of new corpse if applicable
 3. **If player approaches:** Transition to full SAIN combat simulation seamlessly
 
 This turns an expensive combat simulation into a cheap theater production while preserving the player's experience of a living, fighting world.
@@ -405,6 +432,7 @@ This turns an expensive combat simulation into a cheap theater production while 
 The theater approach above still keeps bots as live GameObjects. But STALKER Anomaly's Warfare mode goes further: its SMART (Simulated Military Action in Real Time) terrain system resolves inter-faction combat **entirely offline** using only squad statistics. No GameObjects, no per-frame updates — just math.
 
 **How SMART terrain works in STALKER:**
+
 - The Zone is divided into sectors/territories
 - Each faction controls territories and dispatches squads with statistics (rank, equipment, numbers)
 - When enemy squads enter the same territory, combat is resolved via statistical model
@@ -416,16 +444,18 @@ The theater approach above still keeps bots as live GameObjects. But STALKER Ano
 
 Every SPT bot spawns with complete combat statistics that can feed an offline resolution model:
 
-| Statistic | Source | Combat Relevance |
-|---|---|---|
-| Bot type | `BotOwner.Profile.Info.Settings.Role` | Base power multiplier (PMC > Raider > Scav) |
-| Bot level | `BotOwner.Profile.Info.Level` | Accuracy, reaction time modifier |
-| Weapon class | `BotOwner.WeaponManager` | Damage output, effective range, fire rate |
-| Ammo type | Weapon magazine content | Penetration value vs armor |
-| Armor class | `BotOwner.Profile.Inventory.Equipment` | Damage reduction |
-| Health pool | Head/Thorax/Stomach/Arm/Leg values | Time-to-kill |
-| Squad size | `BotOwner.BotsGroup.MembersCount` | Force multiplier |
-| BotZone | Questing Bots zone tracking | Territory assignment |
+
+| Statistic    | Source                                 | Combat Relevance                            |
+| ------------ | -------------------------------------- | ------------------------------------------- |
+| Bot type     | `BotOwner.Profile.Info.Settings.Role`  | Base power multiplier (PMC > Raider > Scav) |
+| Bot level    | `BotOwner.Profile.Info.Level`          | Accuracy, reaction time modifier            |
+| Weapon class | `BotOwner.WeaponManager`               | Damage output, effective range, fire rate   |
+| Ammo type    | Weapon magazine content                | Penetration value vs armor                  |
+| Armor class  | `BotOwner.Profile.Inventory.Equipment` | Damage reduction                            |
+| Health pool  | Head/Thorax/Stomach/Arm/Leg values     | Time-to-kill                                |
+| Squad size   | `BotOwner.BotsGroup.MembersCount`      | Force multiplier                            |
+| BotZone      | Questing Bots zone tracking            | Territory assignment                        |
+
 
 **Offline combat resolution formula (example):**
 
@@ -468,6 +498,7 @@ When player enters BotZone B: corpses materialize, surviving PMCs transition to 
 **This enables populations BEYOND maxBotCap:**
 
 Current SPT maxBotCap = 29 (Lighthouse). But with offline resolution:
+
 - 10-15 "online" bots (GameObjects in player's perception sphere) — full SAIN
 - 20-40 "offline" bots (statistics only, resolved offline) — zero CPU cost
 - Total perceived population: 30-55 bots
@@ -483,6 +514,7 @@ The visual aftermath (corpses, loot) is only half the experience. In live Tarkov
 **Audio generation from combat statistics:**
 
 When offline combat resolves, the statistical model tells us:
+
 - Which squads fought (PMCs vs Rogues, Scavs vs PMCs)
 - How many bots participated on each side
 - What weapons they carry (AK-74M, M4A1, MP-153 shotgun, etc.)
@@ -510,6 +542,7 @@ t=5.5s: AK-74M dying shots                     at same position
 **Implementation using EFT's own gunshot audio:**
 
 EFT already has weapon-specific audio clips for every gun. We can either:
+
 1. Reference EFT's `AudioClip` assets by weapon template ID and play through temporary `AudioSource` components
 2. Use SAIN's existing gunfire event system (which already triggers audio for online bots)
 3. Create lightweight `CombatAudioSpoofer` MonoBehaviour that schedules and plays gunshot sequences
@@ -550,16 +583,19 @@ public class CombatAudioSpoofer : MonoBehaviour
 
 **Distance-based audio fidelity:**
 
-| Distance to Combat | Audio Behavior | Player Experience |
-|---|---|---|
-| 0-100m | Full gunfire audio, multiple weapon types distinguishable | "That's an M4 vs AK fight nearby, I should check it out" |
-| 100-300m | Attenuated gunfire, less weapon distinction, some shots lost | "I hear fighting over at Water Treatment" |
-| 300-500m | Muffled pops, only louder weapons (sniper, shotgun) audible | "Distant gunfire, somewhere on the map" |
-| 500m+ | No audio (too far to hear) | Silence |
+
+| Distance to Combat | Audio Behavior                                               | Player Experience                                        |
+| ------------------ | ------------------------------------------------------------ | -------------------------------------------------------- |
+| 0-100m             | Full gunfire audio, multiple weapon types distinguishable    | "That's an M4 vs AK fight nearby, I should check it out" |
+| 100-300m           | Attenuated gunfire, less weapon distinction, some shots lost | "I hear fighting over at Water Treatment"                |
+| 300-500m           | Muffled pops, only louder weapons (sniper, shotgun) audible  | "Distant gunfire, somewhere on the map"                  |
+| 500m+              | No audio (too far to hear)                                   | Silence                                                  |
+
 
 **Integration with the combat model:**
 
 The statistical model should produce richer output to feed audio generation:
+
 - `CombatDuration`: how long the firefight lasted
 - `WeaponTypesUsed`: list of weapon templates on each side
 - `ShotDensity`: shots per second (high = intense firefight, low = sniper duel)
@@ -576,6 +612,7 @@ Questing Bots (forked but currently broken on latest SPT) gives bots objectives:
 - **With objectives:** Bots navigate with purpose toward destinations. When the player looks, the bot is moving toward a believable goal — looting a room, heading to extract, patrolling a zone.
 
 The Questing Bots codebase proves:
+
 - BotZone data is accessible at runtime (already used to assign objective locations)
 - BigBrain CustomLayer integration exists (registers at priority 20-30, between LootingBots and SAIN combat)
 - Pathfinding for objectives uses Waypoints' enhanced NavMesh
@@ -585,13 +622,15 @@ We can extract the objective system from Questing Bots and integrate it as a lig
 
 **SPT maxBotCap reference (target populations):**
 
-| Map | SPT maxBotCap (Online) | Offline Squads | Total Perceived | Player-Centric Online Budget |
-|---|---|---|---|---|
-| **Customs** | 19 | 2-3 squads (Reshala patrol, Scav groups) | 25-30 | 3 visible + 5 audible + 11 occluded = ~2.5ms |
-| **Lighthouse** | 29 | 3-5 squads (Rogue patrols, Goon route, Cultist island) | 35-45 | 4 visible + 8 audible + 17 occluded = ~3.2ms |
-| **Streets** | 48 | 4-6 squads (Kaban defense, Scav gangs, PMC groups) | 50-60 | 5 visible + 12 audible + 31 occluded = ~4.3ms |
-| **Interchange** | 30 | 2-3 squads (Killa patrol, Scav groups) | 35-38 | 3 visible + 7 audible + 20 occluded = ~2.6ms |
-| **Reserve** | 28 | 3-4 squads (Glukhar squad, Raider patrols, Scavs) | 33-38 | 3 visible + 8 audible + 17 occluded = ~2.6ms |
+
+| Map             | SPT maxBotCap (Online) | Offline Squads                                         | Total Perceived | Player-Centric Online Budget                  |
+| --------------- | ---------------------- | ------------------------------------------------------ | --------------- | --------------------------------------------- |
+| **Customs**     | 19                     | 2-3 squads (Reshala patrol, Scav groups)               | 25-30           | 3 visible + 5 audible + 11 occluded = ~2.5ms  |
+| **Lighthouse**  | 29                     | 3-5 squads (Rogue patrols, Goon route, Cultist island) | 35-45           | 4 visible + 8 audible + 17 occluded = ~3.2ms  |
+| **Streets**     | 48                     | 4-6 squads (Kaban defense, Scav gangs, PMC groups)     | 50-60           | 5 visible + 12 audible + 31 occluded = ~4.3ms |
+| **Interchange** | 30                     | 2-3 squads (Killa patrol, Scav groups)                 | 35-38           | 3 visible + 7 audible + 20 occluded = ~2.6ms  |
+| **Reserve**     | 28                     | 3-4 squads (Glukhar squad, Raider patrols, Scavs)      | 33-38           | 3 visible + 8 audible + 17 occluded = ~2.6ms  |
+
 
 All maps land under 5ms of AI frame budget for online bots. Offline squads cost zero CPU — resolved via statistical model.
 
@@ -600,17 +639,20 @@ All maps land under 5ms of AI frame budget for online bots. Offline squads cost 
 ### Phase 3: Squad-Level Computation Collapse (fork-enabled)
 
 **6. Shared squad awareness via TalkClass bypass**
+
 - Currently: each bot in a squad independently runs per-body-part raycasts to detect enemies (O(N²) visibility)
 - Change: When one squad member spots an enemy, propagate detection to all squad members without redundant raycasts
 - Impact: Collapses visibility from O(N²) to O(N) for grouped bots (bosses+guards, PMC groups)
 
 **7. Squad hierarchy collapse in CombatSquadLayer**
+
 - Currently: each bot independently evaluates full personality-driven decisions even within squads
 - Change: Squad coordinator computes target distribution, flanking direction, and suppression assignments once → individual bots execute simplified orders
 - Pattern from Bannerlord's 1000-agent battles and Call of Duty's 17-bot local multiplayer
 - Impact: Dramatic reduction for Tarkov's boss/guard groups (Reshala + 4 guards = 5x redundant computation eliminated)
 
 **8. BigBrain layer evaluation migration (State Tree pattern)**
+
 - Currently: BigBrain evaluates ALL layers every tick via `ShallUseNow()` (like Behavior Tree)
 - Change: Switch to "active layer + transitions only" check (like State Tree)
 - Based on StraySpark data: Behavior Tree = 0.042ms/tick/agent, State Tree = 0.011ms/tick/agent (4x reduction)
@@ -633,13 +675,15 @@ All maps land under 5ms of AI frame budget for online bots. Offline squads cost 
 
 **11. Wire state reset through the mod stack**
 
-| Component | Reset Required |
-|---|---|
-| EFT `BotOwner` | Position, health, inventory, equipment, brain state |
-| BigBrain layers | Layer wrappers re-validate brain assignment, reset active layer |
-| SAIN `BotComponent` | Reset `TickClassGroup` timers, vision state, enemy list, decision state |
-| LootingBots `LootingBrain` | Reset `ScanScheduler` tokens, `ActiveLootCache`, `LootFinder` state |
-| AILimit | Re-register recycled bot in distance tracking, spawn eligibility timer |
+
+| Component                  | Reset Required                                                          |
+| -------------------------- | ----------------------------------------------------------------------- |
+| EFT `BotOwner`             | Position, health, inventory, equipment, brain state                     |
+| BigBrain layers            | Layer wrappers re-validate brain assignment, reset active layer         |
+| SAIN `BotComponent`        | Reset `TickClassGroup` timers, vision state, enemy list, decision state |
+| LootingBots `LootingBrain` | Reset `ScanScheduler` tokens, `ActiveLootCache`, `LootFinder` state     |
+| AILimit                    | Re-register recycled bot in distance tracking, spawn eligibility timer  |
+
 
 **12. Threat ring integration (CoD pattern)**
 
@@ -661,13 +705,15 @@ Shared squad awareness             TalkClass bypass (Phase 3.1)
 
 **Risk assessment:**
 
-| Risk | Mitigation |
-|---|---|
-| EFT initialization assumes fresh objects | Audit BotOwner creation path to identify all fields needing reset; write exhaustive ResetState() method |
-| Pool size memory overhead | Cap pool per bot type (e.g., max 5 PMCs, 10 Scavs, 3 Bosses), destroy excess |
-| BigBrain layer leaks on recycled bots | Force `Stop()` + `Start()` lifecycle on all layers during recycle |
-| AILimit interacts with SetActive | Pool deactivates bots; AILimit also deactivates — ensure they don't conflict (pool owns inactive state outside AILimit range) |
-| Compatibility with ABPS spawn patches | ABPS already patches spawn pipeline; pool interceptor must run before ABPS hooks |
+
+| Risk                                     | Mitigation                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| EFT initialization assumes fresh objects | Audit BotOwner creation path to identify all fields needing reset; write exhaustive ResetState() method                       |
+| Pool size memory overhead                | Cap pool per bot type (e.g., max 5 PMCs, 10 Scavs, 3 Bosses), destroy excess                                                  |
+| BigBrain layer leaks on recycled bots    | Force `Stop()` + `Start()` lifecycle on all layers during recycle                                                             |
+| AILimit interacts with SetActive         | Pool deactivates bots; AILimit also deactivates — ensure they don't conflict (pool owns inactive state outside AILimit range) |
+| Compatibility with ABPS spawn patches    | ABPS already patches spawn pipeline; pool interceptor must run before ABPS hooks                                              |
+
 
 **Effort:** HIGH (touches EFT core, multiple mods). **Impact:** Eliminates GC spikes from bot creation/destruction entirely. CoD proves this handles 17 bots in dense CQB at 120+ FPS — SPT can match that.
 
@@ -675,19 +721,22 @@ Shared squad awareness             TalkClass bypass (Phase 3.1)
 
 ## Fork Control Summary
 
-| Mod | Forked? | Can Edit? | Primary Changes |
-|---|---|---|---|
-| **SAIN** | Yes (954 files) | Full control | TickInterval, coroutines, vision LOD, perception LOD, boss override, squads, BigBrain layer eval |
-| **BigBrain** | Yes | Full control | State Tree migration, layer arbitration optimization |
-| **LootingBots** | Yes | Full control | State reset wiring for pool |
-| **Waypoints** | Yes | Full control | Path cache for recycled bots, objective navigation |
-| **SPT-AILimit** | Yes | Full control | Pool compatibility, distance tracking |
-| **botplacementsystem (ABPS)** | Yes | Full control | Pool interceptor in spawn pipeline |
-| **spt-unda** | **DROPPED** — conflicts with ABPS population caps. PMC wave generation bypasses limits we need for budget scheduler. Zone opening logic will be extracted into ABPS directly. |
-| **Questing Bots** | Yes (broken on current SPT) | Full control | Objective system extraction — BotZone tracking, objective types, pathfinding integration (study-only until SPT compatibility is fixed) |
-| **MoreBotsAPI** | Yes | Full control | Spawn control API, per-map bot count configuration (integration with pool system) |
+
+| Mod                           | Forked?                                                                                                                                                                       | Can Edit?    | Primary Changes                                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **SAIN**                      | Yes (954 files)                                                                                                                                                               | Full control | TickInterval, coroutines, vision LOD, perception LOD, boss override, squads, BigBrain layer eval                                       |
+| **BigBrain**                  | Yes                                                                                                                                                                           | Full control | State Tree migration, layer arbitration optimization                                                                                   |
+| **LootingBots**               | Yes                                                                                                                                                                           | Full control | State reset wiring for pool                                                                                                            |
+| **Waypoints**                 | Yes                                                                                                                                                                           | Full control | Path cache for recycled bots, objective navigation                                                                                     |
+| **SPT-AILimit**               | Yes                                                                                                                                                                           | Full control | Pool compatibility, distance tracking                                                                                                  |
+| **botplacementsystem (ABPS)** | Yes                                                                                                                                                                           | Full control | Pool interceptor in spawn pipeline                                                                                                     |
+| **spt-unda**                  | **DROPPED** — conflicts with ABPS population caps. PMC wave generation bypasses limits we need for budget scheduler. Zone opening logic will be extracted into ABPS directly. |              |                                                                                                                                        |
+| **Questing Bots**             | Yes (broken on current SPT)                                                                                                                                                   | Full control | Objective system extraction — BotZone tracking, objective types, pathfinding integration (study-only until SPT compatibility is fixed) |
+| **MoreBotsAPI**               | Yes                                                                                                                                                                           | Full control | Spawn control API, per-map bot count configuration (integration with pool system)                                                      |
+
 
 ## Verification Strategy
+
 - Profile before/after each phase using SAIN's built-in logging + BepInEx.FPSCounter
 - Measure frame time per bot, coroutine CPU time, GC allocations
 - **Benchmark target:** Lighthouse with 29 bots (full maxBotCap) at 60 FPS minimum
@@ -730,65 +779,85 @@ Phase 4 Object Pooling (touches ALL mods)
 ### Mod-by-Mod Change Summary
 
 **SAIN (primary target, most changes):**
-| Phase | Files | What Changes |
-|---|---|---|
-| 1.1 | `Classes/Bot/BotBase.cs` | TickInterval default 0f → 1f/30f |
-| 1.2 | 6 job files | yield return null → WaitForSeconds |
-| 1.3 | Preset config | Enable PerformanceMode + AILimit |
-| 2.1 | `Classes/BotManager/Jobs/VisionRaycastJob.cs` | LOD-tier raycast count reduction |
-| 2.2 | **NEW** `Components/AIFrameBudgetScheduler.cs` | 2ms hard cap, tiered priority processing |
-| 2.2 | `Components/BotComponent.cs` | Wire ManualUpdate() through scheduler |
-| 2.5 | `Classes/Bot/SAINAILimit.cs` | CheckDistances() → CheckPerception() |
-| 2.5 | `Classes/Bot/BotBase.cs` | TickInterval tied to PerceptionTier |
-| 2.5 | `Components/BotComponent.cs` | Skip tick groups per tier |
-| 2.5 | **NEW** `Components/CombatAudioSpoofer.cs` | Audio faking for offline combat |
-| 3.1 | `Classes/Bot/Talk/SAINBotTalkClass.cs` | Squad awareness bypass |
-| 3.2 | `Layers/Combat/Solo/CombatSoloLayer.cs` | Squad coordinator logic |
-| 3.2 | `Layers/Combat/Squad/CombatSquadLayer.cs` | Target distribution, flanking assignment |
-| 4 | `Components/BotComponent.cs` | BotComponent state reset for pool |
+
+
+| Phase | Files                                          | What Changes                             |
+| ----- | ---------------------------------------------- | ---------------------------------------- |
+| 1.1   | `Classes/Bot/BotBase.cs`                       | TickInterval default 0f → 1f/30f         |
+| 1.2   | 6 job files                                    | yield return null → WaitForSeconds       |
+| 1.3   | Preset config                                  | Enable PerformanceMode + AILimit         |
+| 2.1   | `Classes/BotManager/Jobs/VisionRaycastJob.cs`  | LOD-tier raycast count reduction         |
+| 2.2   | **NEW** `Components/AIFrameBudgetScheduler.cs` | 2ms hard cap, tiered priority processing |
+| 2.2   | `Components/BotComponent.cs`                   | Wire ManualUpdate() through scheduler    |
+| 2.5   | `Classes/Bot/SAINAILimit.cs`                   | CheckDistances() → CheckPerception()     |
+| 2.5   | `Classes/Bot/BotBase.cs`                       | TickInterval tied to PerceptionTier      |
+| 2.5   | `Components/BotComponent.cs`                   | Skip tick groups per tier                |
+| 2.5   | **NEW** `Components/CombatAudioSpoofer.cs`     | Audio faking for offline combat          |
+| 3.1   | `Classes/Bot/Talk/SAINBotTalkClass.cs`         | Squad awareness bypass                   |
+| 3.2   | `Layers/Combat/Solo/CombatSoloLayer.cs`        | Squad coordinator logic                  |
+| 3.2   | `Layers/Combat/Squad/CombatSquadLayer.cs`      | Target distribution, flanking assignment |
+| 4     | `Components/BotComponent.cs`                   | BotComponent state reset for pool        |
+
 
 **BigBrain:**
-| Phase | Files | What Changes |
-|---|---|---|
-| 3.3 | `Internal/CustomLayerWrapper.cs` | ShallUseNow() → active-layer-only check |
-| 3.3 | `Brains/BrainManager.cs` | State-Tree-style transition registration |
-| 4 | `Internal/CustomLayerWrapper.cs` | Stop()/Start() lifecycle for pool recycle |
+
+
+| Phase | Files                            | What Changes                              |
+| ----- | -------------------------------- | ----------------------------------------- |
+| 3.3   | `Internal/CustomLayerWrapper.cs` | ShallUseNow() → active-layer-only check   |
+| 3.3   | `Brains/BrainManager.cs`         | State-Tree-style transition registration  |
+| 4     | `Internal/CustomLayerWrapper.cs` | Stop()/Start() lifecycle for pool recycle |
+
 
 **Waypoints:**
-| Phase | Files | What Changes |
-|---|---|---|
-| 2.5 | Pathfinding patches | Cache path results per BotZone for objective navigation |
-| 4 | NavMesh patch | Invalidate path cache on pool recycle |
+
+
+| Phase | Files               | What Changes                                            |
+| ----- | ------------------- | ------------------------------------------------------- |
+| 2.5   | Pathfinding patches | Cache path results per BotZone for objective navigation |
+| 4     | NavMesh patch       | Invalidate path cache on pool recycle                   |
+
 
 **SPT-AILimit:**
-| Phase | Files | What Changes |
-|---|---|---|
-| 2.5 | `Component.cs` | Skip deactivation for offline-tracked bots (they're not GameObjects) |
-| 2.5 | `Component.cs` | Fix LINQ/Min allocation hotspot |
-| 4 | `Component.cs` | Re-register recycled bots in distance tracking |
+
+
+| Phase | Files          | What Changes                                                         |
+| ----- | -------------- | -------------------------------------------------------------------- |
+| 2.5   | `Component.cs` | Skip deactivation for offline-tracked bots (they're not GameObjects) |
+| 2.5   | `Component.cs` | Fix LINQ/Min allocation hotspot                                      |
+| 4     | `Component.cs` | Re-register recycled bots in distance tracking                       |
+
 
 **LootingBots:**
-| Phase | Files | What Changes |
-|---|---|---|
-| 4 | `Controllers/LootingBrain.cs` | Reset ScanScheduler, ActiveLootCache, LootFinder on recycle |
-| 4 | `Controllers/LootFinder.cs` | Clear search state on recycle |
+
+
+| Phase | Files                         | What Changes                                                |
+| ----- | ----------------------------- | ----------------------------------------------------------- |
+| 4     | `Controllers/LootingBrain.cs` | Reset ScanScheduler, ActiveLootCache, LootFinder on recycle |
+| 4     | `Controllers/LootFinder.cs`   | Clear search state on recycle                               |
+
 
 **ABPS (botplacementsystem):**
-| Phase | Files | What Changes |
-|---|---|---|
-| 4 | `BotOwnerCreationPatch.cs` | Pool check before creation |
-| 4 | Spawn patches | Route recycled bots through normal spawn init |
+
+
+| Phase | Files                      | What Changes                                  |
+| ----- | -------------------------- | --------------------------------------------- |
+| 4     | `BotOwnerCreationPatch.cs` | Pool check before creation                    |
+| 4     | Spawn patches              | Route recycled bots through normal spawn init |
+
 
 ### Known Conflict Points & Resolutions
 
 **1. SPT-AILimit vs Perception LOD vs Offline Combat**
 
 Three systems now control bot "liveness":
+
 - SPT-AILimit: `GameObject.SetActive(false)` at extreme range
 - Perception LOD: Full → Audible → Occluded throttling
 - Offline Combat: Statistical model, no GameObject
 
 Resolution order:
+
 ```
 Is bot in offline squad? → YES → Statistical model only (skip both AILimit and Perception)
 Is bot beyond AILimit range? → YES → SetActive(false) (nuclear option)
@@ -798,6 +867,7 @@ Else → Apply Perception tier (Visible/Audible/Occluded)
 **2. Budget Scheduler vs Coroutine Jobs**
 
 Current SAIN has 5+ coroutine jobs running independently. The budget scheduler must either:
+
 - (A) Replace coroutines entirely — scheduler ticks jobs within budget
 - (B) Wrap coroutines — scheduler enables/disables coroutine execution based on budget
 
@@ -879,3 +949,4 @@ STEP 11: Full integration test
 - **Full Questing Bots integration**: Study the objective system, extract the BotZone tracking and objective type definitions, but don't rebuild the full mod. Focus on the lightweight navigation layer for occluded bots.
 - **MoreBotsAPI spawn control**: Only needed for Phase 4 pool integration. Phase 1-3 don't touch spawn counts.
 - **Threat ring (CoD pattern)**: Deferred to Phase 4.2 — requires pool stability first.
+

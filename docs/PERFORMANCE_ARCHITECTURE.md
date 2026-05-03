@@ -1,5 +1,7 @@
 # SAIN Performance Optimization — Architecture & Usage Guide
 
+> **Code location:** All source code lives in `OptimizedMod/`. Paths in this document are relative to `OptimizedMod/` unless noted otherwise.
+
 ## Overview
 
 This document describes the multi-phase performance optimization applied to SAIN (Solarint's AI Modifications) for SPT (Single Player Tarkov). The optimization spans four phases across all forked mods (SAIN, BigBrain, LootingBots, Waypoints, SPT-AILimit, ABPS) with the target of running Lighthouse with 29+ bots at stable 60 FPS.

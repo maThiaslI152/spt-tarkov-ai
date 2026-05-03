@@ -1,6 +1,6 @@
 # OptimizedMod — SPT Tarkov AI Performance Overhaul
 
-Performance-optimized forks of 7 SPT AI mods + new **OptimizationCore** shared library.
+Performance-optimized forks of 6 SPT AI mods + MoreBotsAPI + new **OptimizationCore** shared library.
 Target: **Lighthouse with 29+ bots at stable 60 FPS.**
 
 ## Quick Start (Windows SPT)
@@ -142,7 +142,7 @@ OptimizedMod/
 ## Documentation
 
 - `PROGRESS.md` — Current completion status and test instructions
-- `../PERFORMANCE_ARCHITECTURE.md` — Full architecture guide (all 4 phases)
-- `../PERFORMANCE_PLAN.md` — Detailed todo list with status
+- `PERFORMANCE_ARCHITECTURE.md` — Full architecture guide (all 4 phases)
+- `PERFORMANCE_PLAN.md` — Detailed todo list with status
 - `../INDEX.md` — Workspace entry point
-- `../ARCHITECTURE.md` — Original mod internals + OptimizationCore section
+- `ARCHITECTURE.md` — Original mod internals + OptimizationCore section

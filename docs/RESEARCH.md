@@ -1,7 +1,7 @@
 # SPT Bot AI Optimization: Full Brainstorm
 
-> Completed research grounded in community findings, industry techniques, codebase analysis,
-> and Unity modding constraints. Filtered to what works for Tarkov's specific architecture.
+> **Code location:** All source code lives in `OptimizedMod/`. Code paths referenced below from the original repos (e.g., `SPT-AILimit/Component.cs`) correspond to files in `OptimizedMod/`.  
+> Completed research grounded in community findings, industry techniques, codebase analysis, and Unity modding constraints. Filtered to what works for Tarkov's specific architecture.
 
 ---
 

@@ -302,7 +302,7 @@ void OnPostWorldTick()
 - `ARCHITECTURE.md` — Full internal architecture of all 7 existing mods
 - `RESEARCH.md` — Performance research: TickInterval bug, 12 hotspots, 3-phase optimization plan
 - `INTEGRATION.md` — Cross-mod integration: dependencies, layer priorities, interop APIs
-- `SAIN_AI_PERFORMANCE.md` — SAIN-specific: 69KB optimization guide with 12 identified hotspots
+- `PERFORMANCE_ARCHITECTURE.md` — Performance optimization architecture and identified hotspots
 
 ---
 

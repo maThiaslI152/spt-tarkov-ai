@@ -46,8 +46,6 @@ public class BotManagerComponent : MonoBehaviour
     }
 
     private BotEventHandler _eventHandler;
-    private readonly List<BotComponent> _botListSnapshot = [];
-    private int _lastBotSnapshotCount = -1;
 
     public GameWorldComponent SAINGameWorld { get; private set; }
     public BotsController DefaultController { get; set; }
@@ -71,6 +69,7 @@ public class BotManagerComponent : MonoBehaviour
     public BotSpawnController BotSpawnController { get; private set; }
     public BotSquads BotSquads { get; private set; }
     public BotHearingClass BotHearing { get; private set; }
+    public AIFrameBudgetScheduler BudgetScheduler { get; private set; }
 
     public void PlayerEnviromentChanged(string profileID, IndoorTrigger trigger)
     {
@@ -89,6 +88,12 @@ public class BotManagerComponent : MonoBehaviour
         BotHearing = new BotHearingClass(this);
         BotJobs = new BotJobsClass(this);
         GrenadeController = new GrenadeController(this);
+        BudgetScheduler = new AIFrameBudgetScheduler();
+
+        // Initialize performance monitor for F12 stats + CSV logging
+        var perfMon = gameObject.GetOrAddComponent<SAINPerformanceMonitor>();
+        perfMon.BudgetLimitMs = 2.0f;
+
         GameWorld.OnDispose += Dispose;
     }
 
@@ -100,24 +105,8 @@ public class BotManagerComponent : MonoBehaviour
         WeatherVision.Update(currentTime, deltaTime);
         BotSquads.Update(currentTime, deltaTime);
 
-        HashSet<BotComponent> BotsArray = BotSpawnController.SAINBots;
-        if (BotsArray != null && BotsArray.Count > 0)
-        {
-            if (BotsArray.Count != _lastBotSnapshotCount)
-            {
-                _botListSnapshot.Clear();
-                _botListSnapshot.AddRange(BotsArray);
-                _lastBotSnapshotCount = BotsArray.Count;
-            }
-            for (int i = 0; i < _botListSnapshot.Count; i++)
-            {
-                var bot = _botListSnapshot[i];
-                if (bot != null)
-                {
-                    bot.ManualUpdate(currentTime, deltaTime);
-                }
-            }
-        }
+        // Use budget scheduler to process bots within 2ms hard cap
+        BudgetScheduler.ProcessFrame(BotSpawnController.SAINBots, currentTime, deltaTime);
     }
 
     public void Dispose()

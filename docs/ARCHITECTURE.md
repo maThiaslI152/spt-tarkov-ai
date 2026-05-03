@@ -1,10 +1,7 @@
 # Workspace Architecture — SPT Tarkov AI Optimization
 
-> This document details the internal architecture of the 7 original mods in this workspace:
-> **SPT-BigBrain**, **SAIN**, **SPT-LootingBots**, **SPT-Waypoints**,
-> **SPT-AILimit**, **botplacementsystem**, and **spt-unda**, plus the new
-> **OptimizationCore** performance infrastructure in `OptimizedMod/`. It serves as a reference for
-> understanding, modifying, and optimizing the AI pipeline.
+> **Code location:** All source code lives in `OptimizedMod/`. The architecture described below uses the original mod names (e.g., "SPT-BigBrain") for clarity — actual files are under `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.  
+> This document details the internal architecture of the forked mods plus the new **OptimizationCore** performance infrastructure. It serves as a reference for understanding, modifying, and optimizing the AI pipeline.
 
 ---
 
@@ -342,7 +339,7 @@ Each subsystem checks `Bot.CurrentAILimit` to decide how aggressively to throttl
 
 ### SAIN Performance Hotspots
 
-Ranked by CPU impact per the `SAIN_AI_PERFORMANCE.md`:
+Ranked by CPU impact per the performance analysis in `PERFORMANCE_ARCHITECTURE.md`:
 
 
 | Priority | System               | Location                                  | Default Rate                      | Impact                    |
@@ -1050,87 +1047,36 @@ trailing gunshot burst.
 
 ## Directory Map
 
-```
-Tarkov AI/
-├── ARCHITECTURE.md          ← This file
-├── INTEGRATION.md           ← Cross-mod integration documentation
-├── INDEX.md                 ← AI-agent entry point
-├── OptimizedMod/            ← Performance-optimized fork stack
-│   ├── OPTIMIZED_MOD_README.md  ← Guide to the optimized fork stack
-│   └── OptimizationCore/    ← Shared performance library (NEW)
-│       ├── AIFrameBudgetScheduler.cs  ← 2ms budget cap, tiered processing
-│       ├── PerceptionSystem.cs  ← Player-centric visibility + audibility
-│       ├── OfflineCombatResolver.cs   ← Statistical AI-vs-AI combat
-│       ├── CombatAudioSpoofer.cs      ← Fake gunfire audio at combat zones
-│       ├── PerceptionTier.cs    ← Visible/Audible/Occluded enum
-│       ├── IBudgetedAI.cs       ← ProcessAITick() interface
-│       ├── IOfflineSquad.cs     ← TickOffline() interface
-│       └── OfflineCombatTypes.cs ← OfflineBotStats, OfflineCombatResult
-│
-├── SPT-BigBrain/            ← Behavior layer framework
-│   ├── BigBrainPlugin.cs    ← BepInEx entry point
-│   ├── Brains/
-│   │   ├── BrainManager.cs  ← Central registry
-│   │   ├── CustomLayer.cs   ← Abstract layer base
-│   │   ├── CustomLogic.cs   ← Abstract action base
-│   │   └── CustomBrain.cs   ← Stub (future)
-│   ├── Internal/            ← Bridge/wrapper classes
-│   ├── Patches/             ← Harmony patches
-│   └── VersionChecker/
-│
-├── SAIN/                    ← Combat AI replacement
-│   ├── README.md
-│   ├── SAIN_AI_PERFORMANCE.md  ← 69KB optimization guide
-│   ├── SAIN/
-│   │   ├── SAINPlugin.cs       ← BepInEx entry point
-│   │   ├── Plugin/BigBrainHandler.cs ← BigBrain integration
-│   │   ├── Layers/             ← CustomLayer implementations
-│   │   ├── Components/         ← Unity components
-│   │   ├── Classes/Bot/        ← Per-bot subsystems
-│   │   ├── Classes/BotManager/Jobs/ ← Coroutine jobs
-│   │   ├── Preset/             ← Configuration system
-│   │   └── Patches/            ← Harmony patches
-│   ├── SAINServerMod/          ← Server-side companion
-│   └── References/             ← EFT assembly references
-│
-├── SPT-LootingBots/           ← Bot looting behavior
-│   ├── LootingBots/LootingBots.cs ← BepInEx entry + config
-│   ├── LootingBots/LootingLayer.cs ← CustomLayer
-│   ├── LootingBots/Logic/       ← CustomLogic implementations
-│   ├── LootingBots/Components/  ← MonoBehaviour components
-│   ├── LootingBots/External.cs  ← Public interop API
-│   └── LootingBotsServerMod/    ← Server-side config
-│
-├── SPT-Waypoints/              ← Expanded NavMesh
-│   ├── WaypointsPlugin.cs      ← BepInEx entry + 7 patches
-│   ├── Patches/
-│   │   ├── WaypointPatch.cs    ← Inject custom NavMesh
-│   │   ├── FindPathPatch.cs    ← Override pathfinding
-│   │   └── Door*.cs            ← Door navigation fixes
-│   ├── Components/             ← Debug visualization
-│   └── Helpers/                ← Dependency checker, settings
-│
-├── SPT-AILimit/                ← Distance-based bot deactivation
-│   ├── Plugin.cs               ← BepInEx entry + config + 2 patches
-│   ├── Component.cs            ← AILimitComponent (MonoBehaviour)
-│   ├── ConfigManager.cs        ← Live config change events
-│   └── SettingsHandler.cs      ← Per-map distance handler
-│
-├── botplacementsystem-csharp/  ← Bot spawn & placement control
-│   ├── Client/Plugin.cs        ← BepInEx entry + 13 patches
-│   ├── Client/ABPSConfig.cs    ← Config loader
-│   ├── Client/Patches/         ← 13 Harmony patches
-│   └── Server/                 ← Server-side spawn config
-│       ├── Controllers/        ← Map, PMC, Scav, Boss spawns
-│       └── Models/AbpsConfig.cs
-│
-└── spt-unda/                   ← Server-side PMC spawn overhaul
-    └── BarlogM-Unda/
-        ├── Unda.cs             ← SPT server mod entry
-        ├── Data.cs             ← Zone/player data per map
-        ├── PmcWaveGeneratorEx.cs ← Replaces PMC wave generation
-        ├── ModConfig.cs        ← Config (group size, difficulty)
-        └── Model.cs            ← GeneralLocationInfo
+> **All source code is under `OptimizedMod/`.** The directory names below reflect the original mod identities; actual files live at `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.
 
 ```
+Tarkov AI/
+├── INDEX.md                         ← AI-agent entry point (root level)
+├── docs/                            ← All project documentation
+│   ├── ARCHITECTURE.md              ← This file
+│   ├── INTEGRATION.md               ← Cross-mod integration documentation
+│   ├── PERFORMANCE_ARCHITECTURE.md  ← Optimization architecture
+│   ├── PERFORMANCE_PLAN.md          ← Phase execution plan
+│   └── OPTIMIZED_MOD_README.md      ← Optimized fork stack guide
+│
+└── OptimizedMod/                     ← ALL source code
+    ├── BigBrain/...                  ← Framework (originally SPT-BigBrain)
+    ├── SAIN/...                      ← Combat AI
+    ├── LootingBots/...               ← Looting AI
+    ├── Waypoints/...                 ← Expanded NavMesh
+    ├── AILimit/...                   ← Distance-based deactivation
+    ├── ABPS/...                      ← Spawn control (originally botplacementsystem)
+    ├── MoreBotsAPI/...               ← Custom bot type API
+    └── OptimizationCore/             ← Shared performance library (NEW)
+        ├── AIFrameBudgetScheduler.cs ← 2ms budget cap, tiered processing
+        ├── PerceptionSystem.cs       ← Player-centric visibility + audibility
+        ├── OfflineCombatResolver.cs  ← Statistical AI-vs-AI combat
+        ├── CombatAudioSpoofer.cs     ← Fake gunfire audio at combat zones
+        ├── PerceptionTier.cs         ← Visible/Audible/Occluded enum
+        ├── IBudgetedAI.cs            ← ProcessAITick() interface
+        ├── IOfflineSquad.cs          ← TickOffline() interface
+        └── OfflineCombatTypes.cs     ← OfflineBotStats, OfflineCombatResult
+```
+
+
 

@@ -72,4 +72,9 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Post-Build: copy DLL to SPT plugins -->
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="copy &quot;$(TargetPath)&quot; &quot;$(SPTRoot)\BepInEx\plugins\$(TargetFileName)&quot;" />
+  </Target>
+
 </Project>

@@ -97,6 +97,19 @@ public class SAINAILimit : BotComponentClassBase
             CurrentPerceptionTier = newTier;
             OnPerceptionTierChanged?.Invoke(CurrentPerceptionTier);
 
+            // Diagnostic logging: tier transitions
+            if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+            {
+                UnityEngine.Debug.Log(
+                    $"[SAIN DIAG] TierChange: Bot[{Bot.name}] "
+                    + $"{_lastPerceptionTier} → {newTier} "
+                    + $"(ActiveEnemy={Bot.EnemyController.ActiveHumanEnemy}, "
+                    + $"Enemies={Bot.EnemyController.Enemies.Count}, "
+                    + $"IsVisible={CheckPlayerCanSeeBot()}, "
+                    + $"GroupCombat={CheckGroupMemberInCombat()})"
+                );
+            }
+
             // Update TickInterval to match perception tier
             TickInterval = GetTickIntervalForTier(newTier);
         }
@@ -104,8 +117,8 @@ public class SAINAILimit : BotComponentClassBase
 
     /// <summary>
     /// Determine perception tier: Visible > Audible > Occluded.
-    /// Order of checks: if bot is actively fighting player, Visible. Then check frustum+raycast.
-    /// Then check audibility. Default to Occluded.
+    /// CRITICAL: Bots in combat (has any enemy) are never Occluded — they get at minimum Audible tier.
+    /// Only peaceful/patrolling bots that the player can't see or hear go Occluded (navigation only).
     /// </summary>
     private PerceptionTier DeterminePerceptionTier()
     {
@@ -121,8 +134,48 @@ public class SAINAILimit : BotComponentClassBase
         if (CheckPlayerCanHearBot())
             return PerceptionTier.Audible;
 
-        // Player is unaware of this bot
+        // If any squad member is in combat, this bot should be at least Audible.
+        // Fixes Big Pipe and other followers going passive when their leader fights.
+        if (CheckGroupMemberInCombat())
+            return PerceptionTier.Audible;
+
+        // Bots with ANY tracked enemy stay Audible (AI-vs-AI combat, hunting).
+        // They need movement + basic reactions — can't be navigation-only.
+        if (Bot.EnemyController.Enemies.Count > 0)
+            return PerceptionTier.Audible;
+
+        // Player is unaware of this bot and it's peaceful — navigation only
         return PerceptionTier.Occluded;
+    }
+
+    /// <summary>
+    /// Check if any member of this bot's group/squad is actively fighting.
+    /// If one Goon is in combat, ALL Goons should respond — not stand still.
+    /// Uses EFT ShootData (guaranteed available on BotOwner) to detect group combat.
+    /// </summary>
+    private bool CheckGroupMemberInCombat()
+    {
+        var botsGroup = Bot.BotOwner?.BotsGroup;
+        if (botsGroup == null)
+            return false;
+
+        foreach (var ally in botsGroup.Allies)
+        {
+            if (ally?.AIData?.BotOwner == null)
+                continue;
+
+            var allyOwner = ally.AIData.BotOwner;
+
+            // Check if ally is actively shooting — most reliable combat indicator
+            if (allyOwner.ShootData?.Shooting == true)
+                return true;
+
+            // Check if ally has any enemy target (via EFT enemy system)
+            if (allyOwner.Memory?.GoalEnemy != null)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -174,6 +227,7 @@ public class SAINAILimit : BotComponentClassBase
     /// <summary>
     /// Audibility detection: zero-cost checks for gunfire, sprinting, door breach.
     /// No raycasts needed — just check bot state.
+    /// FIXED: Previously all checks were commented out, causing bots to always be Occluded.
     /// </summary>
     private bool CheckPlayerCanHearBot()
     {
@@ -182,48 +236,71 @@ public class SAINAILimit : BotComponentClassBase
 
         _lastAudibleCheckTime = Time.time;
 
-        // Gunfire: bot recently fired a weapon (last 3 seconds)
-        // NOTE: BotOwner.WeaponManager.LastFireTime is not yet exposed.
-        // TODO: Implement via EFT BotWeaponManager reflection or SAIN shoot tracker
-        // if (Bot.BotOwner?.WeaponManager?.LastFireTime > 0f &&
-        //     Time.time - Bot.BotOwner.WeaponManager.LastFireTime < 3f)
-        // {
-        //     _cachedIsAudible = true;
-        //     return true;
-        // }
+        // Gunfire: bot is actively shooting (SAIN tracked or EFT native)
+        if (Bot.Shoot?.LastShotEnemy != null || Bot.BotOwner?.ShootData?.Shooting == true)
+        {
+            _cachedIsAudible = true;
+            return true;
+        }
 
-        // Sprinting: bot is sprinting within hearing range
-        // NOTE: SAINMoverClass.IsSprinting is not yet implemented.
-        // TODO: Add IsSprinting property to SAINMoverClass
-        // if (Bot.Mover?.IsSprinting == true)
-        // {
-        //     var gameWorld = GameWorldComponent.Instance;
-        //     if (gameWorld != null)
-        //     {
-        //         float dist = 0f;
-        //         var closestPlayer = gameWorld.PlayerTracker?.FindClosestHumanPlayer(
-        //             out dist, Bot.PlayerComponent, out _);
-        //         if (closestPlayer != null && dist < AudibleFootstepRange * AudibleFootstepRange)
-        //         {
-        //             _cachedIsAudible = true;
-        //             return true;
-        //         }
-        //     }
-        // }
+        // Gunfire: bot was shooting recently (within last 3 seconds)
+        // Track last shot time via EFT ShootData
+        if (Bot.BotOwner?.ShootData != null)
+        {
+            // If the bot has been shooting recently, the ShootData will still be in shooting state
+            // or the weapon is not holstered after recent fire
+            if (Bot.BotOwner.ShootData.Shooting)
+            {
+                _lastShotTime = Time.time;
+                _cachedIsAudible = true;
+                return true;
+            }
+        }
 
-        // Recent grenade thrown (last 5 seconds)
-        // NOTE: BotGrenadeManager.LastGrenadeThrowTime is not yet implemented.
-        // TODO: Add LastGrenadeThrowTime tracking to BotGrenadeManager
-        // if (Bot.Grenade?.LastGrenadeThrowTime > 0f &&
-        //     Time.time - Bot.Grenade.LastGrenadeThrowTime < 5f)
-        // {
-        //     _cachedIsAudible = true;
-        //     return true;
-        // }
+        // Check if bot recently shot (tracked internally, within 3 seconds)
+        if (Time.time - _lastShotTime < 3f)
+        {
+            _cachedIsAudible = true;
+            return true;
+        }
+
+        // Sprinting / loud movement: bot moving fast near player
+        if (Bot.Player?.IsSprintEnabled == true)
+        {
+            var gameWorld = GameWorldComponent.Instance;
+            if (gameWorld != null)
+            {
+                gameWorld.PlayerTracker.FindClosestHumanPlayer(
+                    out float dist, Bot.PlayerComponent, out _);
+                if (dist < AudibleFootstepRange * AudibleFootstepRange)
+                {
+                    _cachedIsAudible = true;
+                    return true;
+                }
+            }
+        }
+
+        // Nearby combat: if any group member is shooting, this bot is audible too
+        // This catches Big Pipe standing near Knight who is actively shooting
+        var botsGroup = Bot.BotOwner?.BotsGroup;
+        if (botsGroup != null)
+        {
+            foreach (var ally in botsGroup.Allies)
+            {
+                if (ally?.AIData?.BotOwner?.ShootData?.Shooting == true)
+                {
+                    _cachedIsAudible = true;
+                    return true;
+                }
+            }
+        }
 
         _cachedIsAudible = false;
         return false;
     }
+
+    /// <summary>Internal tracking for when bot last fired. Set when Bot.Shoot.LastShotEnemy changes.</summary>
+    private float _lastShotTime;
 
     /// <summary>
     /// Get the tick interval for a given perception tier.
@@ -271,6 +348,7 @@ public class SAINAILimit : BotComponentClassBase
         _nextPerceptionCheckTime = 0f;
         _lastVisibilityCheckTime = 0f;
         _lastAudibleCheckTime = 0f;
+        _lastShotTime = 0f;
         CurrentAILimit = AILimitSetting.None;
         CurrentPerceptionTier = PerceptionTier.Occluded;
     }

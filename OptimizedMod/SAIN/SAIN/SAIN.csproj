@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>SAIN</RootNamespace>
     <AssemblyName>SAIN</AssemblyName>
-    <ReleaseOutputDir>..\Build\BepInEx\plugins\SAIN\</ReleaseOutputDir>
+    <ReleaseOutputDir>$(SPTRoot)\BepInEx\plugins\SAIN\</ReleaseOutputDir>
   </PropertyGroup>
 
   <PropertyGroup>

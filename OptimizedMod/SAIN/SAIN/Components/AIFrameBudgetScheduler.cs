@@ -26,6 +26,12 @@ public class AIFrameBudgetScheduler
     /// <summary>Number of bots processed this frame (for diagnostics).</summary>
     public int BotsProcessedThisFrame { get; private set; }
 
+    /// <summary>Number of bots skipped this frame due to budget exhaustion.</summary>
+    public int BotsSkippedThisFrame => TotalOnlineBots - BotsProcessedThisFrame;
+
+    /// <summary>Actual elapsed AI processing time in milliseconds for the last frame.</summary>
+    public double BudgetElapsedMs { get; private set; }
+
     /// <summary>Total number of online bots last frame.</summary>
     public int TotalOnlineBots { get; private set; }
 
@@ -95,6 +101,7 @@ public class AIFrameBudgetScheduler
             VisibleBotsLastFrame = 0;
             AudibleBotsLastFrame = 0;
             OccludedBotsLastFrame = 0;
+            BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
             return;
         }
 
@@ -134,6 +141,7 @@ public class AIFrameBudgetScheduler
             if (ShouldStopProcessing())
             {
                 BudgetExhaustedLastFrame = true;
+                BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
                 return;
             }
             ProcessBot(bot, currentTime, deltaTime);
@@ -146,6 +154,7 @@ public class AIFrameBudgetScheduler
             if (ShouldStopProcessing())
             {
                 BudgetExhaustedLastFrame = true;
+                BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
                 return;
             }
             ProcessBot(bot, currentTime, deltaTime);
@@ -163,6 +172,7 @@ public class AIFrameBudgetScheduler
                 {
                     _resumeIndex = (startIndex + i) % occludedCount;
                     BudgetExhaustedLastFrame = true;
+                    BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
                     return;
                 }
                 int idx = (startIndex + i) % occludedCount;
@@ -173,6 +183,17 @@ public class AIFrameBudgetScheduler
         }
 
         BudgetExhaustedLastFrame = false;
+
+        // Save actual elapsed time for the performance monitor
+        BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
+
+        // Diagnostic logging (throttled to every 2 seconds to avoid spam)
+        if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true &&
+            currentTime - _lastDiagLogTime >= 2f)
+        {
+            _lastDiagLogTime = currentTime;
+            LogDiagnostics(currentTime);
+        }
     }
 
     /// <summary>
@@ -188,6 +209,7 @@ public class AIFrameBudgetScheduler
                 activeSquads.Add(squad);
         }
 
+        int combatsResolved = 0;
         for (int i = 0; i < activeSquads.Count; i++)
         {
             for (int j = i + 1; j < activeSquads.Count; j++)
@@ -195,16 +217,26 @@ public class AIFrameBudgetScheduler
                 var squadA = activeSquads[i];
                 var squadB = activeSquads[j];
 
-                // Only resolve if squads are in nearby zones and hostile
                 float distSqr = (squadA.CenterPosition - squadB.CenterPosition).sqrMagnitude;
-                if (distSqr > 400f * 400f) // 400m max engagement range for offline combat
+                if (distSqr > 400f * 400f)
                     continue;
 
                 var result = OfflineCombatResolver.ResolveCombat(
                     squadA.Members, squadB.Members,
                     (squadA.CenterPosition + squadB.CenterPosition) * 0.5f);
 
-                // Schedule audio for the player to hear
+                combatsResolved++;
+
+                // Diagnostic: log offline combat
+                if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+                {
+                    UnityEngine.Debug.Log(
+                        $"[SAIN DIAG] OfflineCombat: {squadA.Faction}({squadA.Members.Count}) vs "
+                        + $"{squadB.Faction}({squadB.Members.Count}) @ {Mathf.Sqrt(distSqr):F0}m | "
+                        + $"Winner={result.Winner}, KIA: A={result.CasualtiesA} B={result.CasualtiesB}"
+                    );
+                }
+
                 var audioSpoofer = BotManagerComponent.Instance?.GetComponent<CombatAudioSpoofer>();
                 if (audioSpoofer == null && BotManagerComponent.Instance != null)
                 {
@@ -212,9 +244,16 @@ public class AIFrameBudgetScheduler
                 }
                 audioSpoofer?.ScheduleOfflineCombatAudio(result);
 
-                // Apply casualties to offline squads
                 ApplyOfflineCasualties(squadA, squadB, result);
             }
+        }
+
+        if (combatsResolved > 0 && SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+        {
+            UnityEngine.Debug.Log(
+                $"[SAIN DIAG] OfflineCombat: Resolved {combatsResolved} engagement(s) across "
+                + $"{OfflineSquadCount} offline squads"
+            );
         }
     }
 
@@ -232,6 +271,7 @@ public class AIFrameBudgetScheduler
     }
 
     private float _lastOfflineCombatTime;
+    private float _lastDiagLogTime;
 
     private bool ShouldStopProcessing()
     {
@@ -241,6 +281,21 @@ public class AIFrameBudgetScheduler
     private static void ProcessBot(BotComponent bot, float currentTime, float deltaTime)
     {
         bot.ManualUpdate(currentTime, deltaTime);
+    }
+
+    /// <summary>Throttled diagnostic log — summary of AI processing this frame.</summary>
+    private void LogDiagnostics(float currentTime)
+    {
+        string status = BudgetExhaustedLastFrame
+            ? $"BUDGET EXHAUSTED at {BudgetElapsedMs:F2}ms of {MaxAIBudgetMs}ms cap"
+            : $"OK — {BudgetElapsedMs:F2}ms / {MaxAIBudgetMs}ms";
+
+        UnityEngine.Debug.Log(
+            $"[SAIN DIAG] Frame: {status} | "
+            + $"Bots: V={VisibleBotsLastFrame} A={AudibleBotsLastFrame} O={OccludedBotsLastFrame} "
+            + $"(processed={BotsProcessedThisFrame}, skipped={BotsSkippedThisFrame}) | "
+            + $"Offline squads: {OfflineSquadCount}"
+        );
     }
 
     /// <summary>

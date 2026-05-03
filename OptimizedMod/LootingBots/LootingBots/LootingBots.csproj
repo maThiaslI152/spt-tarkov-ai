@@ -64,7 +64,7 @@
     </Reference>
   </ItemGroup>
 
-  <Target Name="CleanUnwantedFiles" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CleanUnwantedFiles" AfterTargets="Build">
     <ItemGroup>
       <AllFiles Include="$(OutputPath)**\*" />
       <FilesToKeep Include="$(OutputPath)$(TargetFileName)" />
@@ -75,7 +75,7 @@
     </ItemGroup>
     <Delete Files="@(FilesToDelete)" />
   </Target>
-  <Target Name="CopyBuildOutput" AfterTargets="CleanUnwantedFiles" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="CopyBuildOutput" AfterTargets="CleanUnwantedFiles">
     <MakeDir Directories="$(ReleaseOutputDir)" />
     <ItemGroup>
       <RemainingFiles Include="$(OutputPath)**\*" />
