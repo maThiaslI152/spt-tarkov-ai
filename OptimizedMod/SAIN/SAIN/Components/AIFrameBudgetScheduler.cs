@@ -15,6 +15,8 @@ namespace SAIN.Components;
 /// </summary>
 public class AIFrameBudgetScheduler
 {
+    public static AIFrameBudgetScheduler Instance { get; private set; }
+
     /// <summary>Hard cap on AI processing time per frame, in milliseconds. STALKER-proven value.</summary>
     public float MaxAIBudgetMs = 2.0f;
 
@@ -27,12 +29,29 @@ public class AIFrameBudgetScheduler
     /// <summary>Total number of online bots last frame.</summary>
     public int TotalOnlineBots { get; private set; }
 
+    /// <summary>Number of Visible-tier bots last frame.</summary>
+    public int VisibleBotsLastFrame { get; private set; }
+
+    /// <summary>Number of Audible-tier bots last frame.</summary>
+    public int AudibleBotsLastFrame { get; private set; }
+
+    /// <summary>Number of Occluded-tier bots last frame.</summary>
+    public int OccludedBotsLastFrame { get; private set; }
+
+    /// <summary>Number of offline squads currently tracked.</summary>
+    public int OfflineSquadCount => _offlineSquads.Count;
+
     /// <summary>Registered offline combat squads for statistical resolution.</summary>
     public IReadOnlyList<OfflineSquad> OfflineSquads => _offlineSquads;
 
     private readonly Stopwatch _frameTimer = new();
     private readonly List<OfflineSquad> _offlineSquads = new();
     private int _resumeIndex;
+
+    public AIFrameBudgetScheduler()
+    {
+        Instance = this;
+    }
 
     /// <summary>
     /// Register an offline squad for statistical combat resolution.
@@ -73,6 +92,9 @@ public class AIFrameBudgetScheduler
         {
             BudgetExhaustedLastFrame = false;
             TotalOnlineBots = 0;
+            VisibleBotsLastFrame = 0;
+            AudibleBotsLastFrame = 0;
+            OccludedBotsLastFrame = 0;
             return;
         }
 
@@ -101,6 +123,9 @@ public class AIFrameBudgetScheduler
             }
         }
 
+        VisibleBotsLastFrame = visibleBots.Count;
+        AudibleBotsLastFrame = audibleBots.Count;
+        OccludedBotsLastFrame = occludedBots.Count;
         TotalOnlineBots = visibleBots.Count + audibleBots.Count + occludedBots.Count;
 
         // Phase 1: Visible bots (highest priority — must complete)
@@ -227,6 +252,9 @@ public class AIFrameBudgetScheduler
         BudgetExhaustedLastFrame = false;
         BotsProcessedThisFrame = 0;
         TotalOnlineBots = 0;
+        VisibleBotsLastFrame = 0;
+        AudibleBotsLastFrame = 0;
+        OccludedBotsLastFrame = 0;
         _offlineSquads.Clear();
         _lastOfflineCombatTime = 0f;
     }

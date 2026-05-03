@@ -1,12 +1,18 @@
 using HarmonyLib;
 using SAIN.Components;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace SAIN.Patches;
 
 /// <summary>
 /// Phase 4: Harmony patches that intercept bot GameObject destruction and spawn
 /// to route through the BotGameObjectPool instead.
+/// 
+/// WARNING: The Object.Destroy prefix hook intercepts EVERY Destroy call in Unity.
+/// Each call is gated by IsBotGameObject() checks to avoid false positives, but
+/// this remains a global hook that runs on every non-bot destruction too.
+/// Monitor for performance impact if frame times increase unexpectedly.
 /// </summary>
 internal static class BotPoolPatches
 {

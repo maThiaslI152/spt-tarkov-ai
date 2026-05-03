@@ -63,7 +63,7 @@ public static class SquadCombatCoordinator
             if (member == null || !member.BotActive)
                 continue;
 
-            foreach (var enemy in member.EnemyController.VisibleEnemies.EnemyList)
+            foreach (var enemy in member.EnemyController.VisibleEnemies)
             {
                 if (enemy != null && seenProfiles.Add(enemy.EnemyProfileId))
                 {

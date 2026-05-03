@@ -127,7 +127,6 @@ public class VisionRaycastJob : BotManagerBase
                 }
             }
             yield return wait;
-            }
         }
     }
 

@@ -67,7 +67,7 @@ public abstract class BotBase(BotComponent bot) : IBotClass
 
     public ESAINTickState TickRequirement { get; protected set; } = ESAINTickState.AlwaysUpdate;
     public bool CanEverTick { get; protected set; } = true;
-    public float TickInterval { get; protected set; }
+    public float TickInterval { get; set; } = 1f / 30f;
     public float LastTickTime { get; protected set; }
 }
 

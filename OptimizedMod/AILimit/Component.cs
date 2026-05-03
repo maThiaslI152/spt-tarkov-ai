@@ -4,8 +4,6 @@ using Comfort.Common;
 using dvize.AILimit;
 using EFT;
 using EFT.UI.Ragfair;
-using Fika.Core.Main.PacketHandlers;
-using Fika.Core.Main.Players;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -364,11 +362,6 @@ namespace AILimit
                         standBy.NextCheckTime = Time.time + 10f;
                         player.gameObject.SetActive(true);
                         owner.BotState = EBotState.Active;
-                        var sender = player.gameObject.GetComponent<BotPacketSender>();
-                        if (sender != null)
-                        {
-
-                        }
                     }
                     botCount++;
                 }

@@ -138,11 +138,11 @@ public class SAINPerformanceMonitor : MonoBehaviour
 
         _frameTimer.Restart();
 
-        // Read tier counts from scheduler
-        VisibleBots = GetVisibleBotCount(scheduler);
-        AudibleBots = GetAudibleBotCount(scheduler);
-        OccludedBots = GetOccludedBotCount(scheduler);
-        OfflineSquadCount = GetOfflineSquadCount(scheduler);
+        // Read tier counts directly from scheduler (no reflection)
+        VisibleBots = scheduler.VisibleBotsLastFrame;
+        AudibleBots = scheduler.AudibleBotsLastFrame;
+        OccludedBots = scheduler.OccludedBotsLastFrame;
+        OfflineSquadCount = scheduler.OfflineSquadCount;
 
         BudgetUsedMs = (float)_frameTimer.Elapsed.TotalMilliseconds;
         _avgBudgetMs.Add(BudgetUsedMs);
@@ -157,38 +157,6 @@ public class SAINPerformanceMonitor : MonoBehaviour
         {
             BudgetExhaustedThisFrame = false;
         }
-    }
-
-    private static int GetVisibleBotCount(AIFrameBudgetScheduler scheduler)
-    {
-        try { return (int)typeof(AIFrameBudgetScheduler)
-            .GetField("_visibleBots", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(scheduler) ?? 0; }
-        catch { return 0; }
-    }
-
-    private static int GetAudibleBotCount(AIFrameBudgetScheduler scheduler)
-    {
-        try { return (int)typeof(AIFrameBudgetScheduler)
-            .GetField("_audibleBots", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(scheduler) ?? 0; }
-        catch { return 0; }
-    }
-
-    private static int GetOccludedBotCount(AIFrameBudgetScheduler scheduler)
-    {
-        try { return (int)typeof(AIFrameBudgetScheduler)
-            .GetField("_occludedBots", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(scheduler) ?? 0; }
-        catch { return 0; }
-    }
-
-    private static int GetOfflineSquadCount(AIFrameBudgetScheduler scheduler)
-    {
-        try { return (int)typeof(AIFrameBudgetScheduler)
-            .GetField("_offlineSquads", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.GetValue(scheduler) ?? 0; }
-        catch { return 0; }
     }
 
     private void CollectPoolStats()

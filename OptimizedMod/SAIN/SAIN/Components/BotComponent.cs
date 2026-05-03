@@ -103,6 +103,11 @@ public class BotComponent : BotComponentBase, ISPlayer
         get { return AILimit.CurrentAILimit; }
     }
 
+    public PerceptionTier CurrentPerceptionTier
+    {
+        get { return AILimit.CurrentPerceptionTier; }
+    }
+
     public bool HasEnemy
     {
         get { return Enemy.IsEnemyActive(EnemyController.GoalEnemy); }

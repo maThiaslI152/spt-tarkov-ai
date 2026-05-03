@@ -13,22 +13,44 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BepInEx.Core" Version="5.*" />
-    <PackageReference Include="UnityEngine.Modules" Version="2022.3.43" IncludeAssets="compile" />
+    <Reference Include="0Harmony">
+      <HintPath>$(SPTCore)\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(SPTCore)\BepInEx.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(SPTManaged)\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(SPTManaged)\UnityEngine.AudioModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SPTManaged)\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(SPTManaged)\UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
-      <HintPath>../SAIN/References/hollowed.dll</HintPath>
+      <HintPath>$(SPTManaged)\Assembly-CSharp.dll</HintPath>
     </Reference>
     <Reference Include="Comfort">
-      <HintPath>../SAIN/References/Comfort.dll</HintPath>
+      <HintPath>$(SPTManaged)\Comfort.dll</HintPath>
     </Reference>
     <Reference Include="Comfort.Unity">
-      <HintPath>../SAIN/References/Comfort.Unity.dll</HintPath>
+      <HintPath>$(SPTManaged)\Comfort.Unity.dll</HintPath>
     </Reference>
-    <Reference Include="CommonExtensions" HintPath="../SAIN/References/CommonExtensions.dll" Private="false" />
-    <Reference Include="DissonanceVoip" HintPath="../SAIN/References/DissonanceVoip.dll" Private="false" />
-    <Reference Include="Newtonsoft.Json" HintPath="../SAIN/References/Newtonsoft.Json.dll" Private="false" />
+    <Reference Include="CommonExtensions">
+      <HintPath>$(SPTManaged)\CommonExtensions.dll</HintPath>
+    </Reference>
+    <Reference Include="DissonanceVoip">
+      <HintPath>$(SPTManaged)\DissonanceVoip.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(SPTManaged)\Newtonsoft.Json.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

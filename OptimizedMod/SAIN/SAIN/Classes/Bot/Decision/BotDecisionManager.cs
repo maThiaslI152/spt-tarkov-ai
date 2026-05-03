@@ -271,6 +271,15 @@ public class BotDecisionManager(SAINDecisionClass decisionClass) : BotSubClass<S
 
     private Enemy _lastDecisionEnemy;
 
+    /// <summary>
+    /// Set a squad-level decision from an external coordinator (e.g., SquadCombatCoordinator).
+    /// </summary>
+    public void SetSquadDecision(ESquadDecision squadDecision)
+    {
+        Enemy enemy = Bot.EnemyController.ChooseEnemy();
+        SetDecisions(ECombatDecision.None, squadDecision, ESelfActionType.None, enemy);
+    }
+
     public void ResetDecisions(bool active)
     {
         bool hasDecision = HasDecision;

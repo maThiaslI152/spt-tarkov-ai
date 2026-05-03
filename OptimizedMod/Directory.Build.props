@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!-- SPT installation root — change this if your SPT path differs -->
+    <SPTRoot>E:\SPT 4.0 Dev</SPTRoot>
+    <SPTManaged>$(SPTRoot)\EscapeFromTarkov_Data\Managed</SPTManaged>
+    <SPTPlugins>$(SPTRoot)\BepInEx\plugins</SPTPlugins>
+    <SPTSPT>$(SPTRoot)\BepInEx\plugins\spt</SPTSPT>
+    <SPTCore>$(SPTRoot)\BepInEx\core</SPTCore>
+  </PropertyGroup>
+</Project>

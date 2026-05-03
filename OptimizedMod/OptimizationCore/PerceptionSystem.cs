@@ -17,8 +17,6 @@ public class PerceptionSystem : MonoBehaviour
     private readonly Dictionary<int, float> _lastAudCheck = new();
     private readonly Dictionary<int, PerceptionTier> _cachedTiers = new();
 
-    private static readonly QueryParameters _playerVisParams = new(LayerMaskClass.HighPolyWithTerrainNoGrassMask);
-
     private static PerceptionSystem _instance;
     public static PerceptionSystem Instance => _instance;
 
@@ -94,7 +92,7 @@ public class PerceptionSystem : MonoBehaviour
 
         Vector3 direction = botPosition - _playerCamera.transform.position;
         if (Physics.Raycast(_playerCamera.transform.position, direction.normalized, out RaycastHit hit,
-            direction.magnitude, _playerVisParams, QueryTriggerInteraction.Ignore))
+            direction.magnitude, LayerMaskClass.HighPolyWithTerrainNoGrassMask, QueryTriggerInteraction.Ignore))
         {
             return hit.collider != null && hit.distance >= direction.magnitude - 0.5f;
         }

@@ -209,3 +209,17 @@ public enum AILimitSetting
     VeryFar = 2,
     Narnia = 3,
 }
+
+/// <summary>
+/// Player-centric perception tier — replaces pure-distance AILimit.
+/// Determines how much AI a bot gets based on whether the player can see, hear, or is unaware of it.
+/// </summary>
+public enum PerceptionTier
+{
+    /// <summary>Player can see this bot — full AI, everything must be convincing.</summary>
+    Visible = 0,
+    /// <summary>Player can hear but not see — position + movement only, fake the rest.</summary>
+    Audible = 1,
+    /// <summary>Player is unaware — navigation only, minimal processing.</summary>
+    Occluded = 2,
+}
