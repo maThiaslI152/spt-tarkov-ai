@@ -3,6 +3,8 @@
 > **Code location:** All source code lives in `OptimizedMod/`. The architecture described below uses the original mod names (e.g., "SPT-BigBrain") for clarity — actual files are under `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.  
 > This document details the internal architecture of the forked mods plus the new **OptimizationCore** performance infrastructure. It serves as a reference for understanding, modifying, and optimizing the AI pipeline.
 
+**Agents:** [INDEX.md](../INDEX.md) · [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Table of Contents

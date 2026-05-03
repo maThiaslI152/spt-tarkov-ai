@@ -1,5 +1,6 @@
 using System;
 using SAIN.Components;
+using SAIN.Interop;
 using SAIN.Preset.GlobalSettings;
 using UnityEngine;
 
@@ -98,7 +99,7 @@ public class SAINAILimit : BotComponentClassBase
             OnPerceptionTierChanged?.Invoke(CurrentPerceptionTier);
 
             // Diagnostic logging: tier transitions
-            if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+            if (SainPerfLogInterop.IsDiagnosticLoggingEnabled)
             {
                 UnityEngine.Debug.Log(
                     $"[SAIN DIAG] TierChange: Bot[{Bot.name}] "

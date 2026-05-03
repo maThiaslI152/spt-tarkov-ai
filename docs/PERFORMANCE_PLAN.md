@@ -41,7 +41,7 @@ status: completed
 content: "Capture baseline profiling data before any changes using SAIN logging + BepInEx.FPSCounter"
 status: pending
 - id: f12-perf-monitor
-content: "NEW: SAINPerformanceMonitor — F12-accessible real-time stats, CSV performance logging to BepInEx/LogOutput/sain_perf.csv, Dump Stats button, read-only config entries for FPS/budget/bot distribution"
+content: "SAINPerfLog — F12-accessible scheduler stats + per-raid CSV under LogOutput/sain_perf/; diagnostic toggle; SAIN gates spam via SainPerfLogInterop (legacy in-SAIN SAINPerformanceMonitor path retired)"
 status: completed
 - id: audio-spoofer-wiring
 content: "Phase 2.5: Wire CombatAudioSpoofer to EFT BetterAudio (placeholder ready, needs SPT runtime to locate AudioClip assets by weapon template)"
@@ -49,6 +49,8 @@ status: pending
 isProject: false
 
 ---
+
+> **Doc note (2026-05-03):** Raid perf CSV, BigBrain snapshot CSV, and **F12** scheduler/diagnostic UI now live in **`OptimizedMod/SAINPerfLog/`** (`me.sol.sain.perflog`). The YAML todo **`f12-perf-monitor`** below described the original in-SAIN `SAINPerformanceMonitor` path; runtime behavior is **standalone per-raid files** + **SAINPerfLog (F12)**. SAIN’s **SAIN Performance** config section was removed.
 
 # SAIN Performance Optimization Plan
 

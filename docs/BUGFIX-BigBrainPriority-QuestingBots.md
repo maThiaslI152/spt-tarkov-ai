@@ -50,25 +50,28 @@ File: `OptimizedMod/SAIN/SAIN/Interop/SAINExternal.cs`
 
 Result: `CanBotQuest` now blocks quest behavior more reliably during real combat pressure, even when `GoalEnemy` is transiently null.
 
-## 2) Minimal BigBrain priority diagnostics
+**Public helper:** `SAINExternal.IsBotUnderCombatPressure(BotOwner)` mirrors that predicate for diagnostics and other call sites.
+
+## 2) BigBrain priority diagnostics
 
 File: `OptimizedMod/SAIN/SAIN/Components/BotManagerComponent.cs`
 
-- Added `MaybeLogBigBrainArbitrationHints(currentTime)` in `ManualUpdate`.
+- `MaybeLogBigBrainArbitrationHints(currentTime)` in `ManualUpdate`.
 - Diagnostics are:
-  - **gated** by `SAINPerformanceMonitor.DiagnosticLogging`
-  - **gated** by `ModDetection.QuestingBotsLoaded`
+  - **gated** by `SainPerfLogInterop.IsDiagnosticLoggingEnabled` (toggle **SAINPerfLog → SAINPerfLog (F12) → Diagnostic Logging**)
+  - **not** gated on QuestingBots alone (LootingBots / vanilla / other layers can be diagnosed the same way)
   - **rate-limited** (3s interval)
   - **proximity-filtered** (near human players only)
-  - emitted only when active layer appears mismatched versus threat signals.
-- Logs include:
-  - `BrainManager.GetActiveLayerName(botOwner)`
-  - `SAINLayersActive`
-  - `GoalEnemy`
-  - `CurrentCombatDecision`
-  - `CurrentSquadDecision`
+  - **Warning** when active layer looks mismatched versus threat signals (includes `SAINExternal.IsBotUnderCombatPressure` so `GoalEnemy` can be null and pressure still counts).
+  - Optional **Info** “sample” lines: enable **SAINPerfLog → SAINPerfLog (F12) → `3. BigBrain verbose sample`** to log every proximate bot’s active layer on the same interval (even when no mismatch).
+- Log fields include:
+  - `BaseBrain.ShortName()`, `BrainManager.GetActiveLayerName(botOwner)`, `reason=` heuristic tag
+  - `SAINLayersActive`, `SAINActiveLayer` (enum), `pressure=` (`IsBotUnderCombatPressure`)
+  - `GoalEnemy`, `CurrentCombatDecision`, `CurrentSquadDecision`
 
-Result: enough signal to confirm BigBrain arbitration issues in-raid without adding broad behavior spam.
+Result: enough signal to confirm BigBrain arbitration issues in-raid; verbose mode is intentionally opt-in to avoid log spam.
+
+See also: [`docs/BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md).
 
 ## 3) Squad coordination conflict guard (related behavior stabilizer)
 
@@ -90,7 +93,7 @@ Result: reduces run-stop jitter and prevents squad writes from stomping solo com
 
 Recommended runtime verification:
 
-1. Enable F12 -> SAIN Performance -> `Diagnostic Logging`.
+1. Enable **F12 → SAINPerfLog → `SAINPerfLog (F12)` → `2. Diagnostic Logging`** (requires `SAINPerfLog.dll` alongside SAIN).
 2. Run raid with QuestingBots enabled and reproduce previous passive-combat scenario.
 3. Check `BepInEx/LogOutput.log` for `[SAIN DIAG][BigBrain]` lines.
 4. Confirm active layer and SAIN combat signals align with expected behavior.

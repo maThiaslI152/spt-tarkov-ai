@@ -19,26 +19,21 @@ public class CombatAudioSpoofer : MonoBehaviour
     /// </summary>
     public void ScheduleOfflineCombatAudio(OfflineCombatResult result)
     {
-        if (result == null || result.TotalCasualties == 0)
+        if (result == null || result.EstimatedCombatDuration < 0.2f)
+        {
             return;
+        }
 
         StartCoroutine(PlayCombatSequence(result));
     }
 
     private IEnumerator PlayCombatSequence(OfflineCombatResult result)
     {
-        var allWeapons = new List<string>();
-        allWeapons.AddRange(result.WeaponsUsedA);
-        allWeapons.AddRange(result.WeaponsUsedB);
-
-        if (allWeapons.Count == 0)
-            yield break;
-
         float duration = result.EstimatedCombatDuration;
         float elapsed = 0f;
 
         var shotTimes = new List<float>();
-        int shotCount = Mathf.RoundToInt(duration * 3f);
+        int shotCount = Mathf.Max(4, Mathf.RoundToInt(duration * 3f));
         for (int i = 0; i < shotCount; i++)
         {
             shotTimes.Add(Random.Range(0f, duration));
@@ -72,67 +67,47 @@ public class CombatAudioSpoofer : MonoBehaviour
     }
 
     /// <summary>
-    /// Play a gunshot sound at a position. Integrates with EFT's audio system.
-    /// Attempts BetterAudio first (EFT centralized audio), falls back to
-    /// AudioSource.PlayClipAtPoint (Unity basic audio).
+    /// Play a gunshot sound at a position (Unity one-shot). EFT <c>BetterAudio</c> can be wired later
+    /// once the exact <c>PlayAtPoint</c> overload is confirmed for the target game version.
     /// </summary>
     private static void PlayGunshotSound(Vector3 position, float volume)
     {
-        try
+        AudioClip clip = GetFallbackGunshotClip();
+        if (clip == null || volume <= 0.01f)
         {
-            // Primary path: EFT's centralized audio system
-            // BetterAudio handles distance attenuation, occlusion, and bot hearing reactions.
-            // Uncomment once running on SPT:
-            // var audio = Singleton<BetterAudio>.Instance;
-            // if (audio != null)
-            // {
-            //     var clip = GetWeaponFireClip();
-            //     if (clip != null)
-            //         audio.PlayAtPoint(position, clip, volume);
-            //     return;
-            // }
-        }
-        catch (System.Exception)
-        {
-            // BetterAudio not available — use Unity fallback
+            return;
         }
 
-        // Fallback: Unity's built-in 3D audio
-        // Loads a generic gunshot clip. In production, this should be replaced with
-        // weapon-specific AudioClips from EFT's asset bundles.
-        var fallbackClip = GetFallbackGunshotClip();
-        if (fallbackClip != null && volume > 0.01f)
-        {
-            AudioSource.PlayClipAtPoint(fallbackClip, position, volume);
-        }
+        AudioSource.PlayClipAtPoint(clip, position, volume);
     }
 
     /// <summary>
-    /// Get weapon-specific fire AudioClip from EFT's item factory.
-    /// Returns null if the audio system isn't available (standalone build, Mac).
-    /// </summary>
-    private static AudioClip GetWeaponFireClip()
-    {
-        // EFT stores weapon sounds in ItemFactory. Access pattern:
-        //   var item = Singleton<ItemFactory>.Instance.GetPresetItem(templateId);
-        //   var audioClip = item.GetWeaponSounds().FireClip;
-        // Returns null on non-SPT platforms.
-        return null;
-    }
-
-    /// <summary>
-    /// Fallback generic gunshot clip. In production, load from EFT bundled resources
-    /// or ship a small embedded AudioClip in the mod's asset bundle.
+    /// Short procedural pop so offline combat is audible without shipping WAV assets.
     /// </summary>
     private static AudioClip GetFallbackGunshotClip()
     {
-        if (_cachedFallbackClip == null)
+        if (_cachedFallbackClip != null)
         {
-            // Try to load from EFT's bundled resources (e.g., "audio/weapons/ak74_fire")
-            // _cachedFallbackClip = Resources.Load<AudioClip>("weapons/generic_gunshot");
-            // Returns null on non-SPT platforms — audio is silently skipped.
+            return _cachedFallbackClip;
         }
-        return _cachedFallbackClip;
+
+        const int sampleRate = 44100;
+        const float clipSeconds = 0.06f;
+        int sampleCount = Mathf.Max(256, (int)(sampleRate * clipSeconds));
+        var samples = new float[sampleCount];
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float t = i / (float)sampleCount;
+            float envelope = Mathf.Exp(-t * 8f);
+            float crack = Mathf.Sin(i * 0.31f) * (1f - t) * 0.35f;
+            samples[i] = Mathf.Clamp((crack + (Mathf.PerlinNoise(i * 0.02f, 0f) - 0.5f) * 0.5f) * envelope, -1f, 1f);
+        }
+
+        var clip = AudioClip.Create("SAIN_OfflineGunshotFallback", sampleCount, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        _cachedFallbackClip = clip;
+        return clip;
     }
+
     private static AudioClip _cachedFallbackClip;
 }

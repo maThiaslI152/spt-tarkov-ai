@@ -169,9 +169,8 @@ DeterminePerceptionTier():
 
 To verify the fix is working in-game:
 
-1. Press **F12** to open the SAIN Performance Monitor
-2. Enable `Monitor Enabled` and `CSV Logging`
-3. Check `VisibleBots` / `AudibleBots` / `OccludedBots` counters — bots in combat near the player should appear in Visible or Audible, never Occluded
-4. On Lighthouse with Goons: Big Pipe should engage when Knight detects and fights the player
-5. Check `BepInEx/LogOutput/sain_perf.csv` for tier distribution data
+1. Press **F12** → **`SAINPerfLog`** → **`SAINPerfLog (F12)`** and leave **F12 Status Lines** on
+2. In raid, watch the read-only **Bot / Tier** line (`V:` / `A:` / `O:` / `Off:`) — bots in combat near the player should sit in **Visible** or **Audible**, not **Occluded**
+3. On Lighthouse with Goons: Big Pipe should engage when Knight detects and fights the player
+4. Optional: inspect **`BepInEx/LogOutput/sain_perf/`** timestamped perf CSV rows for tier/processed counts (written by **SAINPerfLog**, not SAIN)
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using EFT;
+using SAIN.Interop;
 using SAIN.Models.Enums;
 using SAIN.Plugin;
 using UnityEngine;
@@ -194,7 +195,7 @@ public class AIFrameBudgetScheduler
         BudgetElapsedMs = _frameTimer.Elapsed.TotalMilliseconds;
 
         // Diagnostic logging (throttled to every 2 seconds to avoid spam)
-        if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true &&
+        if (SainPerfLogInterop.IsDiagnosticLoggingEnabled &&
             currentTime - _lastDiagLogTime >= 2f)
         {
             _lastDiagLogTime = currentTime;
@@ -234,7 +235,7 @@ public class AIFrameBudgetScheduler
                 combatsResolved++;
 
                 // Diagnostic: log offline combat
-                if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+                if (SainPerfLogInterop.IsDiagnosticLoggingEnabled)
                 {
                     UnityEngine.Debug.Log(
                         $"[SAIN DIAG] OfflineCombat: {squadA.Faction}({squadA.Members.Count}) vs "
@@ -254,7 +255,7 @@ public class AIFrameBudgetScheduler
             }
         }
 
-        if (combatsResolved > 0 && SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+        if (combatsResolved > 0 && SainPerfLogInterop.IsDiagnosticLoggingEnabled)
         {
             UnityEngine.Debug.Log(
                 $"[SAIN DIAG] OfflineCombat: Resolved {combatsResolved} engagement(s) across "
@@ -265,6 +266,11 @@ public class AIFrameBudgetScheduler
 
     private static void ApplyOfflineCasualties(OfflineSquad squadA, OfflineSquad squadB, OfflineCombatResult result)
     {
+        if (IsAutoManagedSquad(squadA) || IsAutoManagedSquad(squadB))
+        {
+            return;
+        }
+
         // Mark bots as dead in offline tracking
         for (int i = 0; i < result.CasualtiesA && squadA.Members.Count > 0; i++)
         {
@@ -274,6 +280,12 @@ public class AIFrameBudgetScheduler
         {
             squadB.Members.RemoveAt(squadB.Members.Count - 1);
         }
+    }
+
+    private static bool IsAutoManagedSquad(OfflineSquad squad)
+    {
+        return squad?.SquadId != null
+            && squad.SquadId.StartsWith("auto_", StringComparison.Ordinal);
     }
 
     private float _lastOfflineCombatTime;

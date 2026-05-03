@@ -6,6 +6,16 @@
 
 ---
 
+## Posture vs BigBrain layers (Rogues vs Scavs)
+
+- **This plan’s “Stationary / Patrol / Standby”** means **defense posture and squad orders** for **Rogues in base-defense context** (coordinator + settings), **not** a requirement to extend that policy to **Scavs**.
+- **Scavs** stay out of scope for Rogue base-defense **behavior** (see regression note below). Their default SAIN behavior should remain as today.
+- **EFT / BigBrain vanilla layer names** (e.g. `StationaryWS`, `PatrolAssault`) are a **separate concern**: SAIN removes many of them from the **shared** `_commonVanillaLayersToRemove` list for **all brains that use that list** (including `ExUsec` and Scav brains when vanilla is off), so vanilla “stationary / patrol” **layers** do not keep winning arbitration over SAIN. That is documented in [`BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md), not something this Rogue-only feature toggles per faction.
+
+So: **Rogues** — yes, the plan cares about stationary/patrol **posture** in defense mode. **Scavs** — no for this plan’s **policy**; they still benefit from the **global** strip list like any other bot type using those layers.
+
+---
+
 ## Objective
 
 Implement Rogue-specific coordinated defense behavior that:

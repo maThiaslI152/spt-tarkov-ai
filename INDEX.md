@@ -3,77 +3,88 @@
 > **Purpose:** Entry point for AI coding agents working on this workspace. Read this first to
 > understand what exists, where things are, and which document to open for a given task.
 
+**Companion:** [docs/AGENTS.md](docs/AGENTS.md) — read order by task, build commands, high-signal
+code paths, telemetry locations, and doc-update checklist.
+
 ---
 
 ## Quick Reference
 
-| Question | Answer |
-|---|---|
-| **What is this workspace?** | Optimization of SPT Tarkov AI mods. All source code lives in `OptimizedMod/` (6 forked mods: BigBrain, SAIN, LootingBots, Waypoints, AILimit, ABPS + MoreBotsAPI + new OptimizationCore library). |
-| **What is OptimizedMod?** | Performance-optimized forks of 6 mods + MoreBotsAPI + new OptimizationCore library (budget scheduler, perception LOD, offline combat) |
-| **Language** | C# (.NET Framework), BepInEx plugin, Harmony patching, Unity Engine, SPT server DI |
-| **Core dependency** | **BigBrain** for behavior mods (SAIN, LootingBots). **Waypoints** for pathfinding. Others are standalone. |
-| **Entry point** | Client mods: BepInEx `[BepInPlugin]`. Server mods: SPT DI `[Injectable]`. |
+
+| Question                                      | Answer                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **What is this workspace?**                   | Optimization of SPT Tarkov AI mods. All source code lives in `OptimizedMod/` (6 forked mods: BigBrain, SAIN, LootingBots, Waypoints, AILimit, ABPS + MoreBotsAPI + new OptimizationCore library).                                                                                                            |
+| **What is OptimizedMod?**                     | Performance-optimized forks of 6 mods + MoreBotsAPI + new OptimizationCore library (budget scheduler, perception LOD, offline combat). **SMART slice:** auto `OfflineSquad` registration + statistical combat + procedural distant audio — see [docs/SMART_OFFLINE_COMBAT.md](docs/SMART_OFFLINE_COMBAT.md). |
+| **Language**                                  | C# (.NET Framework), BepInEx plugin, Harmony patching, Unity Engine, SPT server DI                                                                                                                                                                                                                           |
+| **Core dependency**                           | **BigBrain** for behavior mods (SAIN, LootingBots). **Waypoints** for pathfinding. Others are standalone.                                                                                                                                                                                                    |
+| **Entry point**                               | Client mods: BepInEx `[BepInPlugin]`. Server mods: SPT DI `[Injectable]`.                                                                                                                                                                                                                                    |
+| **Raid perf CSV + F12 scheduler/diagnostics** | **SAINPerfLog** (`me.sol.sain.perflog`) — separate DLL from **SAIN**; see [docs/SAIN_PERFLOG.md](docs/SAIN_PERFLOG.md)                                                                                                                                                                                       |
+
 
 ---
 
 ## Documentation Map
 
-All project documentation lives in `docs/`. `INDEX.md` is the sole root-level entry point for AI agents.
+All narrative documentation lives in **`docs/`**. **`INDEX.md`** (this file) is the root hub; **`docs/AGENTS.md`** is the task-oriented companion for agents.
 
-| Document | Content | Read When |
-|---|---|---|
-| **[INDEX.md](INDEX.md)** | This file — workspace overview, quick answers, file map | Always start here (root level) |
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Deep dive into each mod's internal design: classes, tick flows, layer systems, performance hotspots | Understanding a specific mod's internals |
-| **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | How mods connect: dependency chains, layer priority, interop APIs, conflict resolution | Modifying cross-mod behavior, adding a new mod |
-| **[docs/RESEARCH.md](docs/RESEARCH.md)** | Completed research: community findings, industry AI techniques, Unity constraints, filtered recommendations | Understanding the "why" behind design decisions |
-| **[docs/PERFORMANCE_ARCHITECTURE.md](docs/PERFORMANCE_ARCHITECTURE.md)** | Multi-phase performance optimization architecture: budget scheduler, perception LOD, offline combat | Understanding the optimization system design |
-| **[docs/PERFORMANCE_PLAN.md](docs/PERFORMANCE_PLAN.md)** | Task-level execution plan with phase tracking and completion status | Checking optimization progress or adding new phases |
-| **[docs/OPTIMIZED_MOD_README.md](docs/OPTIMIZED_MOD_README.md)** | Comprehensive guide to the optimized fork stack: budget scheduler, perception system, offline combat, audio spoofer, build setup, and usage | Working on or understanding the optimized forks |
-| **[docs/SPTQuestingBots.md](docs/SPTQuestingBots.md)** | SPT QuestingBots mod overview: architecture, questing system, PMC spawning, configuration | Understanding or integrating QuestingBots |
-| **[docs/MoreBotsAPI.md](docs/MoreBotsAPI.md)** | MoreBotsAPI framework: custom WildSpawnType registration, client prepatching, server registration | Adding custom bot types |
-| **[docs/discussion1.md](docs/discussion1.md)** | Design discussion: architecture decisions, integration strategy, AI LOD, tick management, risk register | Understanding architectural trade-offs and decisions |
-| **[docs/PROGRESS.md](docs/PROGRESS.md)** | Implementation progress tracker for the optimization work | Tracking what's done and what remains |
-| **[docs/ROGUE_BASE_DEFENSE_PLAN.md](docs/ROGUE_BASE_DEFENSE_PLAN.md)** | Planned Rogue (`ExUsec`) base-defense squad coordination + no-loot policy | Designing/defending Rogue behavior on Lighthouse without regressions |
-| **[docs/BUGFIX-BigBrainPriority-QuestingBots.md](docs/BUGFIX-BigBrainPriority-QuestingBots.md)** | BigBrain arbitration fix: QuestingBots vs SAIN combat gating + minimal diagnostics | Debugging passive combat / wrong active layer selection with QuestingBots |
-| **[docs/BUGFIX-SAINAILimit-Audibility.md](docs/BUGFIX-SAINAILimit-Audibility.md)** | Critical bugfix: SAINAILimit audibility detection was broken — bots not fighting, Big Pipe passive | Debugging AI "detect → stop → loop" behavior or boss passivity |
-| **[docs/BUGFIX-SAINLayerPriority.md](docs/BUGFIX-SAINLayerPriority.md)** | Critical bugfix: SAIN combat layers at priority 20-22 blocked by BotMind — bots stuck in patrol, never fight | Debugging bots ignoring player fire or stuck in patrol/follow |
+| Document | Content | Read when |
+| -------- | ------- | --------- |
+| **[INDEX.md](INDEX.md)** | Workspace overview, concepts, file map, layer priorities | First file every session |
+| **[docs/AGENTS.md](docs/AGENTS.md)** | Read order by goal, builds, hot paths, telemetry paths, doc checklist | Right after INDEX for implementation work |
+| **[docs/INTEGRATION.md](docs/INTEGRATION.md)** | Dependencies, layer priority, interop, compatibility matrix | Cross-mod changes, new mods, priority conflicts |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Per-mod internals: ticks, layers, hotspots | Deep dive on one mod |
+| **[docs/OPTIMIZED_MOD_README.md](docs/OPTIMIZED_MOD_README.md)** | Fork stack guide: scheduler, perception, offline combat, builds | Stack-wide behavior and configuration |
+| **[docs/PERFORMANCE_ARCHITECTURE.md](docs/PERFORMANCE_ARCHITECTURE.md)** | Optimization architecture (budget, LOD, offline) | System design for performance |
+| **[docs/AI_BUDGET_LOD_PLAN.md](docs/AI_BUDGET_LOD_PLAN.md)** | Budget vs fidelity goals, Analogy to Anomaly, **gaps** (whole-bot skips, CSV vs feel), checklist | Tuning `MaxAiBudgetMilliseconds`, interpreting perf CSV, reducing jitter |
+| **[docs/PERFORMANCE_PLAN.md](docs/PERFORMANCE_PLAN.md)** | Phased execution plan + status | Roadmap / phase tracking |
+| **[docs/SAIN_PERFLOG.md](docs/SAIN_PERFLOG.md)** | **Shipped** SAINPerfLog: per-raid CSV, F12, SAIN `SainPerfLogInterop` contract | Telemetry, F12 copy, output paths |
+| **[docs/SAIN_PERFLOG_STANDALONE_PLAN.md](docs/SAIN_PERFLOG_STANDALONE_PLAN.md)** | Original split plan (history) | Compare plan vs `SAIN_PERFLOG.md` |
+| **[docs/SMART_OFFLINE_COMBAT.md](docs/SMART_OFFLINE_COMBAT.md)** | Shipped offline **slice** vs full SMART roadmap | `OfflineSquad*`, distant combat, audio spoof |
+| **[docs/STATUS_BIGBRAIN_AND_ROGUE.md](docs/STATUS_BIGBRAIN_AND_ROGUE.md)** | BigBrain + Rogue: fixed vs open, strip scope | Onboarding, “Rogue-only vs global strips” |
+| **[docs/ROGUE_BASE_DEFENSE_PLAN.md](docs/ROGUE_BASE_DEFENSE_PLAN.md)** | Rogue (`ExUsec`) base defense + no-loot | Lighthouse Rogue squads |
+| **[docs/BIGBRAIN_LAYER_MATRIX.md](docs/BIGBRAIN_LAYER_MATRIX.md)** | Layer registration + vanilla strip inventory | Auditing `RemoveLayers` / arbitration |
+| **[docs/BUGFIX-BigBrainPriority-QuestingBots.md](docs/BUGFIX-BigBrainPriority-QuestingBots.md)** | QuestingBots vs SAIN combat gating | Passive combat with QB |
+| **[docs/BUGFIX-SAINAILimit-Audibility.md](docs/BUGFIX-SAINAILimit-Audibility.md)** | Audibility / tier bug (detect loop, Big Pipe) | Hearing tier / combat freeze |
+| **[docs/BUGFIX-SAINLayerPriority.md](docs/BUGFIX-SAINLayerPriority.md)** | Combat layer priority vs BotMind | Stuck patrol, ignores fire |
+| **[docs/PROGRESS.md](docs/PROGRESS.md)** | Session log + completion checklist | What shipped this week / open items |
+| **[docs/SPTQuestingBots.md](docs/SPTQuestingBots.md)** | QuestingBots architecture | QB integration |
+| **[docs/MoreBotsAPI.md](docs/MoreBotsAPI.md)** | Custom spawn types, prepatch, server | MoreBotsAPI |
+| **[docs/RESEARCH.md](docs/RESEARCH.md)** | Research notes and filtered recommendations | Design rationale |
+| **[docs/discussion1.md](docs/discussion1.md)** | Early architecture discussion | Historical trade-offs |
+
+**Mod-local readmes (not in `docs/`):** `OptimizedMod/SAIN/README.md`, `OptimizedMod/LootingBots/README.md`, `OptimizedMod/LootingBots/using_looting_bots_interop.md`, `OptimizedMod/MoreBotsAPI/README.md`.
+
 
 ---
 
 ## Repository Map
 
-> **All source code lives in `OptimizedMod/`.** Root directories (`SPT-BigBrain/`, `SAIN/`, etc.) are empty legacy placeholders and should be ignored.
+> **All source code lives in `OptimizedMod/`.** Ignore empty legacy top-level folders outside `OptimizedMod/` if your checkout still has them.
 
 ```
 Tarkov AI/
-├── INDEX.md                         ← You are here (root-level entry point)
-├── docs/                            ← All project documentation (13+ files)
-│   ├── ARCHITECTURE.md              ← Mod internals (classes, ticks, layers)
-│   ├── INTEGRATION.md               ← Cross-mod wiring (dependencies, priorities, interop)
-│   ├── RESEARCH.md                  ← Research findings and filtered recommendations
-│   ├── PERFORMANCE_ARCHITECTURE.md  ← Optimization system architecture
-│   ├── PERFORMANCE_PLAN.md          ← Phase execution plan with completion status
-│   ├── OPTIMIZED_MOD_README.md      ← Optimized fork stack guide
-│   ├── SPTQuestingBots.md           ← QuestingBots mod overview and architecture
-│   ├── MoreBotsAPI.md               ← MoreBotsAPI framework documentation
-│   ├── discussion1.md               ← Architectural design discussion
-│   ├── BUGFIX-BigBrainPriority-QuestingBots.md ← BigBrain arbitration + QB combat gating bugfix
-│   ├── BUGFIX-SAINAILimit-Audibility.md ← Critical AI behavior bugfix (detect→loop, Big Pipe)
-│   ├── BUGFIX-SAINLayerPriority.md   ← Combat layer priority fix (bots stuck in patrol)
-│   ├── ROGUE_BASE_DEFENSE_PLAN.md    ← Planned Rogue base-defense squad coordination + no-loot policy
-│   └── PROGRESS.md                  ← Implementation progress tracker
+├── INDEX.md                         ← Root hub (this file)
+├── docs/                            ← Narrative docs (~20 topic files + agent companion)
+│   ├── AGENTS.md                    ← Task read order, builds, hot paths (AI agents)
+│   ├── ARCHITECTURE.md / INTEGRATION.md / OPTIMIZED_MOD_README.md
+│   ├── PERFORMANCE_*.md / AI_BUDGET_LOD_PLAN.md
+│   ├── SAIN_PERFLOG.md (+ _STANDALONE_PLAN history)
+│   ├── SMART_OFFLINE_COMBAT.md / STATUS_BIGBRAIN_AND_ROGUE.md / ROGUE_BASE_DEFENSE_PLAN.md
+│   ├── BIGBRAIN_LAYER_MATRIX.md / BUGFIX-*.md / PROGRESS.md
+│   └── RESEARCH.md / SPTQuestingBots.md / MoreBotsAPI.md / discussion1.md
 │
-├── OptimizedMod/                     ← ALL source code lives here
-│   ├── SAIN/                         ← Combat AI: shipped sources live under SAIN/SAIN/
-│   │   ├── SAIN.csproj               ← Root build compiles `SAIN/**` only; legacy duplicate roots (Classes/, Components/, …) removed from repo
-│   │   ├── SAIN/SAINPlugin.cs        ← [BepInPlugin] entry, TryCreateCustomPreset()
-│   │   ├── SAIN/Plugin/BigBrainHandler.cs ← Registers SAIN layers, removes vanilla layers
-│   │   ├── SAIN/Layers/              ← CustomLayer implementations (CombatSolo, CombatSquad, …)
-│   │   ├── SAIN/Components/          ← MonoBehaviour components (BotComponent, BudgetScheduler, …)
-│   │   ├── SAIN/Classes/Bot/         ← Per-bot subsystems (Decision, Vision, Hearing, Memory, etc.)
-│   │   ├── SAIN/Classes/BotManager/Jobs/ ← Coroutine-based global jobs
-│   │   ├── SAIN/Preset/              ← Configuration system (GlobalSettings, BotSettings)
+├── OptimizedMod/                     ← ALL mod source
+│   ├── SAIN/                         ← Combat AI — **shipping code: SAIN/SAIN/**
+│   │   ├── SAIN.csproj               ← Builds inner `SAIN/SAIN/` tree
+│   │   ├── SAIN/SAIN/SAINPlugin.cs   ← [BepInPlugin] entry, preset init
+│   │   ├── SAIN/SAIN/Plugin/BigBrainHandler.cs
+│   │   ├── SAIN/SAIN/Interop/        ← SAINExternal, SainPerfLogInterop (no hard ref to PerfLog DLL)
+│   │   ├── SAIN/SAIN/Layers/
+│   │   ├── SAIN/SAIN/Components/     ← BotManager, AIFrameBudgetScheduler, offline squad/audio, GameWorld
+│   │   ├── SAIN/SAIN/Classes/Bot/
+│   │   ├── SAIN/SAIN/Classes/BotManager/Jobs/
+│   │   ├── SAIN/SAIN/Preset/
+│   │   └── SAINServerMod/            ← Server-side SAIN project (when used)
 │   │
 │   ├── BigBrain/                     ← Framework: BrainManager, CustomLayer, CustomLogic
 │   │   ├── BigBrainPlugin.cs         ← [BepInPlugin] entry, 6 Harmony patches
@@ -83,7 +94,7 @@ Tarkov AI/
 │   │   ├── Internal/                 ← Wrappers bridging Custom* to EFT's native brain types
 │   │   └── Patches/                  ← Harmony patches into EFT brain activation/update
 │   │
-│   ├── LootingBots/                  ← Looting AI: corpse/container/item scanning, gear swap
+│   ├── LootingBots/                  ← Looting AI (+ LootingBotsServerMod/ when used)
 │   │   ├── LootingBots/LootingBots.cs     ← [BepInPlugin] entry, config, layer registration
 │   │   ├── LootingBots/LootingLayer.cs    ← CustomLayer; priority via BigBrainLootLayerPriority (default 62)
 │   │   ├── LootingBots/Logic/        ← CustomLogic implementations (FindLoot, Loot, Peaceful)
@@ -107,8 +118,13 @@ Tarkov AI/
 │   │   ├── Plugin/Plugin.cs          ← Client BepInEx plugin
 │   │   └── Server/                   ← Server-side registration
 │   │
-│   └── OptimizationCore/             ← Shared perf library (not referenced by SAIN.csproj; SAIN inlines scheduler/components)
-│       ├── AIFrameBudgetScheduler.cs ← Reference patterns duplicated under `SAIN/SAIN/Components/` for shipping DLL
+│   ├── SAINPerfLog/                  ← Standalone raid telemetry (per-raid CSV, F12, optional BigBrain snapshots)
+│   │   ├── SAINPerfLog.csproj
+│   │   ├── PerfLogPlugin.cs          ← [BepInPlugin]; diagnostic toggle exposed for SAIN via reflection
+│   │   └── Components/               ← e.g. RaidPerfCsvLogger
+│   │
+│   └── OptimizationCore/           ← Shared perf/reference types (SAIN may mirror patterns; build when changing shared contracts)
+│       ├── AIFrameBudgetScheduler.cs ← See also shipped `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs`
 │       ├── PerceptionSystem.cs       ← Player-centric visibility (frustum + raycast) and audibility
 │       ├── OfflineCombatResolver.cs  ← Statistical AI-vs-AI combat using bot stats
 │       ├── CombatAudioSpoofer.cs     ← Fake gunfire audio at combat zones with distance attenuation
@@ -128,10 +144,12 @@ Tarkov AI/
 
 All behavior mods register through BigBrain's `BrainManager`. The two core abstractions are:
 
-| Abstraction | Purpose | Lifecycle Methods |
-|---|---|---|
-| `CustomLayer` | A behavior mode (e.g., "CombatSolo", "Looting") | `IsActive()` → `GetNextAction()` → `IsCurrentActionEnding()` → `Start()`/`Stop()` |
-| `CustomLogic<T>` | An action within a layer (e.g., "DogFight", "LootCorpse") | `Start()` → `Update(T data)` → `Stop()` |
+
+| Abstraction      | Purpose                                                   | Lifecycle Methods                                                                 |
+| ---------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `CustomLayer`    | A behavior mode (e.g., "CombatSolo", "Looting")           | `IsActive()` → `GetNextAction()` → `IsCurrentActionEnding()` → `Start()`/`Stop()` |
+| `CustomLogic<T>` | An action within a layer (e.g., "DogFight", "LootCorpse") | `Start()` → `Update(T data)` → `Stop()`                                           |
+
 
 **How they connect:** A `CustomLayer` returns a `CustomLayer.Action` from `GetNextAction()`.
 The action specifies a `CustomLogic` type. BigBrain's internal `CustomLayerWrapper` bridges
@@ -156,55 +174,65 @@ Priority ~62: LootingBots LootingLayer (default BigBrainLootLayerPriority — pe
 
 SAIN's per-bot tick is organized into **4 groups** with different activation conditions:
 
-| Group | Activation Condition | Key Members |
-|---|---|---|
-| `_alwaysTickClasses` | Every frame | SAINActivationClass, SAINAILimit, SAINEnemyController, SAINDecisionClass |
-| `_tickWhenActiveClasses` | Bot is active | SAINBotUnstuckClass |
-| `_tickWhenNoSleepClasses` | Bot not in standby | Vision, Hearing, Mover, Cover, Steering, Memory, Suppression (~18 classes) |
-| `_tickWhenCombatClasses` | Bot in combat | SAINShootData, AimDownSightsController, SAINFriendlyFireClass |
+
+| Group                     | Activation Condition | Key Members                                                                |
+| ------------------------- | -------------------- | -------------------------------------------------------------------------- |
+| `_alwaysTickClasses`      | Every frame          | SAINActivationClass, SAINAILimit, SAINEnemyController, SAINDecisionClass   |
+| `_tickWhenActiveClasses`  | Bot is active        | SAINBotUnstuckClass                                                        |
+| `_tickWhenNoSleepClasses` | Bot not in standby   | Vision, Hearing, Mover, Cover, Steering, Memory, Suppression (~18 classes) |
+| `_tickWhenCombatClasses`  | Bot in combat        | SAINShootData, AimDownSightsController, SAINFriendlyFireClass              |
+
 
 ### 4. Performance Architecture (SAIN)
 
 SAIN has a **3-tier AI Limit system** based on distance from the nearest human player:
 
-| Tier | Distance | Vision Rate | Cover | Decision Rate |
-|---|---|---|---|---|
-| None | < 150m | 30Hz | 10Hz | 10Hz |
-| Far | 150-250m | Reduced | 5Hz | 5Hz |
-| VeryFar | 250-400m | Minimal | Disabled | 3Hz |
-| Narnia | > 400m | Near-zero | Disabled | 2Hz |
+
+| Tier    | Distance | Vision Rate | Cover    | Decision Rate |
+| ------- | -------- | ----------- | -------- | ------------- |
+| None    | < 150m   | 30Hz        | 10Hz     | 10Hz          |
+| Far     | 150-250m | Reduced     | 5Hz      | 5Hz           |
+| VeryFar | 250-400m | Minimal     | Disabled | 3Hz           |
+| Narnia  | > 400m   | Near-zero   | Disabled | 2Hz           |
+
 
 ### 5. Performance Architecture (LootingBots)
 
 LootingBots has **3 performance gates**:
 
-| Gate | Default | Mechanism |
-|---|---|---|
-| ActiveBotCache | 20 bots max | Bots beyond cap have looting brain disabled entirely |
-| Distance gating | 0 (off) | Bots beyond N meters from player are disabled |
-| ScanScheduler | 3 concurrent | Token-based limiter — only N bots scan at once |
+
+| Gate            | Default      | Mechanism                                            |
+| --------------- | ------------ | ---------------------------------------------------- |
+| ActiveBotCache  | 20 bots max  | Bots beyond cap have looting brain disabled entirely |
+| Distance gating | 0 (off)      | Bots beyond N meters from player are disabled        |
+| ScanScheduler   | 3 concurrent | Token-based limiter — only N bots scan at once       |
+
 
 ### 6. Mod Categories
 
 The 6 forked mods (plus OptimizationCore) form **four layers** of the AI stack:
 
-| Layer | Mods | Function |
-|---|---|---|
-| **Infrastructure** | Waypoints, AILimit | NavMesh data, bot activation. Below behavior mods. |
-| **Behavior Framework** | BigBrain | `BrainManager`, `CustomLayer`/`CustomLogic` abstractions. |
-| **Behavior Mods** | SAIN, LootingBots | Combat AI and looting AI. Extend BigBrain. |
-| **Spawn/Placement** | ABPS (botplacementsystem fork) | Controls what bots spawn, where, and how many. Client+Server. |
-| **Performance/Scale** | OptimizedMod/OptimizationCore | Frame budget scheduling, player-centric perception LOD, offline combat resolution, audio spoofing. Wraps the entire stack. |
+
+| Layer                  | Mods                           | Function                                                                                                                   |
+| ---------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| **Infrastructure**     | Waypoints, AILimit             | NavMesh data, bot activation. Below behavior mods.                                                                         |
+| **Behavior Framework** | BigBrain                       | `BrainManager`, `CustomLayer`/`CustomLogic` abstractions.                                                                  |
+| **Behavior Mods**      | SAIN, LootingBots              | Combat AI and looting AI. Extend BigBrain.                                                                                 |
+| **Spawn/Placement**    | ABPS (botplacementsystem fork) | Controls what bots spawn, where, and how many. Client+Server.                                                              |
+| **Performance/Scale**  | OptimizedMod/OptimizationCore  | Frame budget scheduling, player-centric perception LOD, offline combat resolution, audio spoofing. Wraps the entire stack. |
+
 
 ### 7. No-BigBrain Mods
 
 Three mods operate **without BigBrain** because they work at a lower level:
 
-| Mod | Integration Mechanism | Why No BigBrain |
-|---|---|---|
-| **Waypoints** | Direct Harmony patches into `BotsController.Init` and `BotPathFinderClass.FindPath` | Operates at Unity NavMesh level, below brain abstraction |
-| **AILimit** | `MonoBehaviour` on GameWorld, `GameObject.SetActive(false)` | Operates at Unity GameObject level, below brain tick |
-| **botplacementsystem (ABPS)** | 13 Harmony patches into bot spawn system | Controls bot spawning, not bot behavior |
+
+| Mod                           | Integration Mechanism                                                               | Why No BigBrain                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Waypoints**                 | Direct Harmony patches into `BotsController.Init` and `BotPathFinderClass.FindPath` | Operates at Unity NavMesh level, below brain abstraction |
+| **AILimit**                   | `MonoBehaviour` on GameWorld, `GameObject.SetActive(false)`                         | Operates at Unity GameObject level, below brain tick     |
+| **botplacementsystem (ABPS)** | 13 Harmony patches into bot spawn system                                            | Controls bot spawning, not bot behavior                  |
+
 
 ---
 
@@ -212,19 +240,23 @@ Three mods operate **without BigBrain** because they work at a lower level:
 
 ### Task: Add a new bot behavior
 
-1. Read `docs/ARCHITECTURE.md` → SAIN Layer/Action System section
-2. Read `docs/INTEGRATION.md` → SAIN ↔ BigBrain → Registration Flow
-3. Create a new class extending `SAINLayer` or `CustomLayer`
-4. Register via `BrainManager.AddCustomLayer()` in plugin init
-5. Choose appropriate priority (above/below existing layers)
+1. Skim `docs/AGENTS.md` read-order row for architecture
+2. Read `docs/ARCHITECTURE.md` → SAIN Layer/Action System section
+3. Read `docs/INTEGRATION.md` → SAIN ↔ BigBrain → Registration Flow
+4. Create a new class extending `SAINLayer` or `CustomLayer`
+5. Register via `BrainManager.AddCustomLayer()` in plugin init
+6. Choose appropriate priority (above/below existing layers)
 
 ### Task: Fix a performance issue
 
-1. Read `docs/ARCHITECTURE.md` → SAIN Performance Hotspots section
-2. Read `docs/PERFORMANCE_ARCHITECTURE.md` for the full optimization architecture and hotspot analysis
-3. Identify the hotspot from the ranked priority table
-4. Check the AI Limit tiering system (`Bot.CurrentAILimit`) for throttling hooks
-5. Use `WaitForSeconds` caching, `ShallTick()` gating, or coroutine interval adjustment
+1. Read `docs/AI_BUDGET_LOD_PLAN.md` if symptoms are jitter / “CSV looks fine but feels wrong”
+2. Read `docs/ARCHITECTURE.md` → SAIN Performance Hotspots section
+3. Read `docs/PERFORMANCE_ARCHITECTURE.md` for the full optimization architecture and hotspot analysis
+4. Identify the hotspot from the ranked priority table
+5. Check the AI Limit tiering system (`Bot.CurrentAILimit`) for throttling hooks
+6. Use `WaitForSeconds` caching, `ShallTick()` gating, or coroutine interval adjustment
+7. For per-raid telemetry, use `OptimizedMod/SAINPerfLog/` output files (`BepInEx/LogOutput/sain_perf/`) instead of legacy `sain_perf.csv` overwrite workflow
+8. For **live scheduler counters** and the **diagnostic logging** toggle, use **F12 → `SAINPerfLog` → `SAINPerfLog (F12)`** (SAIN itself no longer exposes a **SAIN Performance** section)
 
 ### Task: Understand how SAIN and LootingBots coexist
 
@@ -239,7 +271,7 @@ Three mods operate **without BigBrain** because they work at a lower level:
 3. Document in `docs/ARCHITECTURE.md` (new section before Directory Map)
 4. Document in `docs/INTEGRATION.md` (new section before Mod Compatibility Matrix)
 5. Update the compatibility matrix and known integration points table
-6. Update `INDEX.md` repository map and quick reference
+6. Update `INDEX.md` (documentation map + repository map) and `docs/AGENTS.md` if onboarding paths change
 
 ### Task: Understand BigBrain's internal mechanics
 
@@ -255,10 +287,11 @@ Three mods operate **without BigBrain** because they work at a lower level:
 3. **ABPS**: Reduce `SoftCap` and per-map limits, enable `DespawnFurthest`
 4. **Combined approach**: AILimit for farthest, SAIN limit for mid-range, ABPS for total cap
 5. **OptimizedMod approach**: Use `AIFrameBudgetScheduler` (2ms hard cap with Visible/Audible/Occluded
-   priority tiers) + `PerceptionSystem` (camera frustum + raycast, replacing distance-only AILimit) +
+  priority tiers) + `PerceptionSystem` (camera frustum + raycast, replacing distance-only AILimit) +
    `OfflineCombatResolver` (statistical combat for bots outside player view) + `CombatAudioSpoofer`
    (fake audio instead of real AI processing for distant combat)
 6. See `docs/PERFORMANCE_ARCHITECTURE.md` for identified code-level hotspots
+7. For the **implemented offline slice** (auto squad registration, procedural distant audio, roadmap): `docs/SMART_OFFLINE_COMBAT.md`
 
 ### Task: Tune PMC spawns with ABPS
 
@@ -281,13 +314,16 @@ Real-world frame time measurements for calibration. These baselines help quantif
 between current performance and the 16.7ms target (60 fps). Each row is a concrete datapoint
 from actual gameplay.
 
-| # | Map | Bots | Scenario | Frame Time | FPS | CPU | GPU | Date |
-|---|---|---|---|---|---|---|---|---|
-| **1** | Custom | 5-6 fighting | Combat | ~20ms | ~15 (↓45 from 60) | Ryzen 5 5600 | RX 5700 XT | 2026-05-02 |
-| 2 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | — |
-| 3 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | — |
+
+| #     | Map    | Bots         | Scenario | Frame Time | FPS               | CPU          | GPU        | Date       |
+| ----- | ------ | ------------ | -------- | ---------- | ----------------- | ------------ | ---------- | ---------- |
+| **1** | Custom | 5-6 fighting | Combat   | ~20ms      | ~15 (↓45 from 60) | Ryzen 5 5600 | RX 5700 XT | 2026-05-02 |
+| 2     | *TBD*  | *TBD*        | *TBD*    | *TBD*      | *TBD*             | *TBD*        | *TBD*      | —          |
+| 3     | *TBD*  | *TBD*        | *TBD*    | *TBD*      | *TBD*             | *TBD*        | *TBD*      | —          |
+
 
 **Interpretation of Baseline 1:**
+
 - With only 5-6 bots fighting on a custom map, frame time already exceeds the 16.7ms budget by ~3ms
 - At typical bot counts (15-20 on Streets/Lighthouse), this scales non-linearly due to O(N²) vision checks
 - Target: bring 5-6 bot combat frame time under 16.7ms → then scale to 15-20 bots
@@ -306,35 +342,43 @@ record frame time (BepInEx.FPSCounter or SAIN debug overlay), and add a row abov
 
 > All code paths are relative to `OptimizedMod/`. All document paths are relative to `docs/`.
 
-| Need | File(s) | Section |
-|---|---|---|
-| SAIN layer registration code | `SAIN/SAIN/Plugin/BigBrainHandler.cs` | `BrainAssignment.Init()` |
-| LootingBots layer registration | `LootingBots/LootingBots/LootingBots.cs` | `Awake()` |
-| How a CustomLayer works | `BigBrain/Brains/CustomLayer.cs` | Full file (49 lines) |
-| How a CustomLogic works | `BigBrain/Brains/CustomLogic.cs` | Full file (27 lines) |
-| BigBrain wrapper internals | `BigBrain/Internal/CustomLayerWrapper.cs`, `CustomLogicWrapper.cs` | Whole files |
-| SAIN tick entry point | `SAIN/SAIN/Components/GameWorldComponent.cs` | `WorldTick()` |
-| SAIN bot tick groups | `SAIN/SAIN/Components/BotComponent.cs` | `ManualUpdate()`, `TickClassGroup()` |
-| SAIN performance architecture | `docs/PERFORMANCE_ARCHITECTURE.md` | Full document |
-| SAIN AI limit tiers | `SAIN/SAIN/Classes/Bot/SAINAILimit.cs` | `AILimitSetting` enum |
-| SAINAILimit audibility bugfix | `docs/BUGFIX-SAINAILimit-Audibility.md` | Full document — 3 bugs, fixes, verification guide |
-| SAIN layer priority bugfix | `docs/BUGFIX-SAINLayerPriority.md` | Full document — priority conflict with BotMind, fix and verification |
-| LootingBots interop API | `LootingBots/LootingBots/External.cs` | All public methods |
-| LootingBots scan scheduling | `LootingBots/LootingBots/Utilities/ScanScheduler.cs` | `CanStartScan()` |
-| LootingBots loot state machine | `LootingBots/LootingBots/Components/LootingBrain.cs` | `Update()`, async loot methods |
-| All mod dependency declarations | Each mod's plugin `.cs` file | `[BepInDependency]` attributes |
-| Waypoints NavMesh injection | `Waypoints/Patches/WaypointPatch.cs` | `InjectNavmesh()` |
-| Waypoints pathfinding override | `Waypoints/Patches/FindPathPatch.cs` | `PatchPrefix()` |
-| AILimit bot activation logic | `AILimit/Component.cs` | `Update()`, `UpdateBots()` |
-| AILimit config (distances/limits) | `AILimit/Plugin.cs` | Config.Bind entries |
-| ABPS spawn patches | `ABPS/Client/Plugin.cs` | `Awake()` → patch list |
-| ABPS server config | `ABPS/Server/Models/AbpsConfig.cs` | Full config model |
-| OptimizationCore budget scheduler | `OptimizationCore/AIFrameBudgetScheduler.cs` | `Update()`, `ProcessTier()`, `RegisterBot()` |
-| OptimizationCore perception | `OptimizationCore/PerceptionSystem.cs` | `EvaluateBot()`, `IsVisible()` |
-| OptimizationCore offline combat | `OptimizationCore/OfflineCombatResolver.cs` | `ResolveCombat()`, `CalculateSquadPower()` |
-| OptimizationCore audio spoofing | `OptimizationCore/CombatAudioSpoofer.cs` | `ScheduleCombatAudio()`, `PlayCombatSequence()` |
-| OptimizationCore interfaces | `OptimizationCore/IBudgetedAI.cs`, `IOfflineSquad.cs` | `ProcessAITick()`, `TickOffline()` |
-| OptimizationCore types/enums | `OptimizationCore/PerceptionTier.cs`, `OfflineCombatTypes.cs` | `PerceptionTier` enum, `OfflineBotStats`, `OfflineCombatResult` |
+
+| Need                                   | File(s)                                                                   | Section                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| SAIN layer registration code           | `SAIN/SAIN/Plugin/BigBrainHandler.cs`                                     | `BrainAssignment.Init()`                                                                            |
+| LootingBots layer registration         | `LootingBots/LootingBots/LootingBots.cs`                                  | `Awake()`                                                                                           |
+| How a CustomLayer works                | `BigBrain/Brains/CustomLayer.cs`                                          | Full file (49 lines)                                                                                |
+| How a CustomLogic works                | `BigBrain/Brains/CustomLogic.cs`                                          | Full file (27 lines)                                                                                |
+| BigBrain wrapper internals             | `BigBrain/Internal/CustomLayerWrapper.cs`, `CustomLogicWrapper.cs`        | Whole files                                                                                         |
+| SAIN tick entry point                  | `SAIN/SAIN/Components/GameWorldComponent.cs`                              | `WorldTick()`                                                                                       |
+| SAIN bot tick groups                   | `SAIN/SAIN/Components/BotComponent.cs`                                    | `ManualUpdate()`, `TickClassGroup()`                                                                |
+| SAIN performance architecture          | `docs/PERFORMANCE_ARCHITECTURE.md`                                        | Full document                                                                                       |
+| SAIN AI limit tiers                    | `SAIN/SAIN/Classes/Bot/SAINAILimit.cs`                                    | `AILimitSetting` enum                                                                               |
+| SAINAILimit audibility bugfix          | `docs/BUGFIX-SAINAILimit-Audibility.md`                                   | Full document — 3 bugs, fixes, verification guide                                                   |
+| SAIN layer priority bugfix             | `docs/BUGFIX-SAINLayerPriority.md`                                        | Full document — priority conflict with BotMind, fix and verification                                |
+| LootingBots interop API                | `LootingBots/LootingBots/External.cs`                                     | All public methods                                                                                  |
+| LootingBots scan scheduling            | `LootingBots/LootingBots/Utilities/ScanScheduler.cs`                      | `CanStartScan()`                                                                                    |
+| LootingBots loot state machine         | `LootingBots/LootingBots/Components/LootingBrain.cs`                      | `Update()`, async loot methods                                                                      |
+| All mod dependency declarations        | Each mod's plugin `.cs` file                                              | `[BepInDependency]` attributes                                                                      |
+| Waypoints NavMesh injection            | `Waypoints/Patches/WaypointPatch.cs`                                      | `InjectNavmesh()`                                                                                   |
+| Waypoints pathfinding override         | `Waypoints/Patches/FindPathPatch.cs`                                      | `PatchPrefix()`                                                                                     |
+| AILimit bot activation logic           | `AILimit/Component.cs`                                                    | `Update()`, `UpdateBots()`                                                                          |
+| AILimit config (distances/limits)      | `AILimit/Plugin.cs`                                                       | Config.Bind entries                                                                                 |
+| ABPS spawn patches                     | `ABPS/Client/Plugin.cs`                                                   | `Awake()` → patch list                                                                              |
+| ABPS server config                     | `ABPS/Server/Models/AbpsConfig.cs`                                        | Full config model                                                                                   |
+| OptimizationCore budget scheduler      | `OptimizationCore/AIFrameBudgetScheduler.cs`                              | `Update()`, `ProcessTier()`, `RegisterBot()`                                                        |
+| OptimizationCore perception            | `OptimizationCore/PerceptionSystem.cs`                                    | `EvaluateBot()`, `IsVisible()`                                                                      |
+| OptimizationCore offline combat        | `OptimizationCore/OfflineCombatResolver.cs`                               | `ResolveCombat()`, `CalculateSquadPower()`                                                          |
+| OptimizationCore audio spoofing        | `OptimizationCore/CombatAudioSpoofer.cs`                                  | `ScheduleCombatAudio()`, `PlayCombatSequence()`                                                     |
+| SAIN shipped offline combat + audio    | `SAIN/SAIN/Components/OfflineCombatResolver.cs`, `CombatAudioSpoofer.cs`  | Runtime resolver + procedural fallback audio                                                        |
+| SAIN auto offline squads (SMART slice) | `SAIN/SAIN/Components/OfflineSquadWorldSync.cs`, `BotManagerComponent.cs` | `TrySync`, `RegisterOfflineSquad`; see [docs/SMART_OFFLINE_COMBAT.md](docs/SMART_OFFLINE_COMBAT.md) |
+| SAIN offline→online stub               | `SAIN/SAIN/Components/OfflineSquadMaterialization.cs`                     | Reserved API; not implemented                                                                       |
+| SAIN ↔ QuestingBots / combat API       | `SAIN/SAIN/Interop/SAINExternal.cs`                                      | `IsBotInCombat`, combat pressure helpers                                                             |
+| SAIN ↔ SAINPerfLog (reflection)        | `SAIN/SAIN/Interop/SainPerfLogInterop.cs`                                | Diagnostic logging gate; no assembly reference to PerfLog                                            |
+| Raid CSV logger implementation        | `SAINPerfLog/Components/RaidPerfCsvLogger.cs`                            | Per-raid append, flush on raid end                                                                   |
+| OptimizationCore interfaces            | `OptimizationCore/IBudgetedAI.cs`, `IOfflineSquad.cs`                     | `ProcessAITick()`, `TickOffline()`                                                                  |
+| OptimizationCore types/enums           | `OptimizationCore/PerceptionTier.cs`, `OfflineCombatTypes.cs`             | `PerceptionTier` enum, `OfflineBotStats`, `OfflineCombatResult`                                     |
+
 
 ---
 
@@ -342,14 +386,16 @@ record frame time (BepInEx.FPSCounter or SAIN debug overlay), and add a row abov
 
 Complete priority hierarchy across all mods:
 
-| Priority | Layer | Mod | Bot Types |
-|---|---|---|---|
-| 99 | DebugLayer | SAIN | All |
-| 80 | SAINAvoidThreatLayer | SAIN | All |
-| ~65 | ExtractLayer | SAIN | PMCs, Scavs (configurable) |
-| ~60-70 | CombatSquadLayer | SAIN | All |
-| ~60-70 | CombatSoloLayer | SAIN | All |
-| ~62 (cfg) | LootingLayer | LootingBots | All registered brains (`BigBrainLootLayerPriority` default 62) |
+
+| Priority  | Layer                | Mod         | Bot Types                                                      |
+| --------- | -------------------- | ----------- | -------------------------------------------------------------- |
+| 99        | DebugLayer           | SAIN        | All                                                            |
+| 80        | SAINAvoidThreatLayer | SAIN        | All                                                            |
+| ~65       | ExtractLayer         | SAIN        | PMCs, Scavs (configurable)                                     |
+| ~60-70    | CombatSquadLayer     | SAIN        | All                                                            |
+| ~60-70    | CombatSoloLayer      | SAIN        | All                                                            |
+| ~62 (cfg) | LootingLayer         | LootingBots | All registered brains (`BigBrainLootLayerPriority` default 62) |
+
 
 ---
 

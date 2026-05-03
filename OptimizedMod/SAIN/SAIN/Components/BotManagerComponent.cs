@@ -8,6 +8,8 @@ using SAIN.BotController.Classes;
 using SAIN.Components.BotController;
 using SAIN.Components.BotControllerSpace.Classes;
 using SAIN.Components.PlayerComponentSpace;
+using SAIN.Interop;
+using SAIN.Layers;
 using SAIN.Layers.Combat.Solo;
 using SAIN.Layers.Combat.Squad;
 using SAIN.Plugin;
@@ -99,16 +101,15 @@ public class BotManagerComponent : MonoBehaviour
         BotJobs = new BotJobsClass(this);
         GrenadeController = new GrenadeController(this);
         BudgetScheduler = new AIFrameBudgetScheduler();
+        OfflineSquadWorldSync.ResetForNewRaid();
 
-        // Initialize performance monitor for F12 stats + CSV logging
-        gameObject.GetOrAddComponent<SAINPerformanceMonitor>();
         SyncAiFrameBudgetFromPreset();
 
         GameWorld.OnDispose += Dispose;
     }
 
     /// <summary>
-    /// Keeps <see cref="AIFrameBudgetScheduler.MaxAIBudgetMs"/> and perf-monitor display in sync with preset (hot-reload safe).
+    /// Keeps <see cref="AIFrameBudgetScheduler.MaxAIBudgetMs"/> in sync with preset (hot-reload safe).
     /// </summary>
     private void SyncAiFrameBudgetFromPreset()
     {
@@ -121,9 +122,6 @@ public class BotManagerComponent : MonoBehaviour
         if (Mathf.Abs(BudgetScheduler.MaxAIBudgetMs - ms) > 0.0001f)
             BudgetScheduler.MaxAIBudgetMs = ms;
 
-        var perfMon = SAINPerformanceMonitor.Instance;
-        if (perfMon != null && Mathf.Abs(perfMon.BudgetLimitMs - ms) > 0.0001f)
-            perfMon.BudgetLimitMs = ms;
     }
 
     public void ManualUpdate(float currentTime, float deltaTime)
@@ -136,17 +134,17 @@ public class BotManagerComponent : MonoBehaviour
 
         SyncAiFrameBudgetFromPreset();
         MaybeLogBigBrainArbitrationHints(currentTime);
+        OfflineSquadWorldSync.TrySync(this, currentTime);
         BudgetScheduler.ProcessFrame(BotSpawnController.SAINBots, currentTime, deltaTime);
     }
 
     /// <summary>
-    /// Minimal diagnostics for BigBrain priority fights (QuestingBots vs SAIN combat).
-    /// Runs only when DiagnosticLogging is enabled on <see cref="SAINPerformanceMonitor"/> and QuestingBots is loaded.
+    /// BigBrain arbitration hints: active layer vs SAIN combat/extract stack, gated by SAINPerfLog diagnostic toggle.
+    /// Optional verbose mode logs every human-proximate bot (see SAINPerfLog F12 config).
     /// </summary>
     private void MaybeLogBigBrainArbitrationHints(float currentTime)
     {
-        var perfMon = SAINPerformanceMonitor.Instance;
-        if (perfMon == null || !perfMon.DiagnosticLogging || !ModDetection.QuestingBotsLoaded)
+        if (!SainPerfLogInterop.IsDiagnosticLoggingEnabled)
         {
             return;
         }
@@ -163,6 +161,8 @@ public class BotManagerComponent : MonoBehaviour
         {
             return;
         }
+
+        bool verbose = SainPerfLogInterop.IsBigBrainVerboseSamplingEnabled;
 
         foreach (BotComponent bot in BotSpawnController.SAINBots)
         {
@@ -183,22 +183,106 @@ public class BotManagerComponent : MonoBehaviour
             }
 
             string layer = BrainManager.GetActiveLayerName(owner);
-            if (!LooksLikePriorityMismatch(bot, layer))
+            bool mismatch = LooksLikePriorityMismatch(bot, owner, layer);
+            if (verbose && !mismatch)
+            {
+                LogBigBrainDiagLine(bot, owner, layer, mismatch: false, infoOnly: true);
+            }
+
+            if (!mismatch)
             {
                 continue;
             }
 
-            string goal =
-                bot.GoalEnemy?.EnemyPlayer?.Profile?.Nickname
-                ?? bot.GoalEnemy?.EnemyProfileId
-                ?? "none";
-
-            Logger.LogWarning(
-                $"[SAIN DIAG][BigBrain] {owner.name} layer=\"{layer}\" " +
-                $"SAINLayersActive={bot.SAINLayersActive} GoalEnemy={goal} " +
-                $"Combat={bot.Decision.CurrentCombatDecision} Squad={bot.Decision.CurrentSquadDecision}"
-            );
+            LogBigBrainDiagLine(bot, owner, layer, mismatch: true, infoOnly: false);
         }
+    }
+
+    private static void LogBigBrainDiagLine(BotComponent bot, BotOwner owner, string layer, bool mismatch, bool infoOnly)
+    {
+        string goal =
+            bot.GoalEnemy?.EnemyPlayer?.Profile?.Nickname
+            ?? bot.GoalEnemy?.EnemyProfileId
+            ?? "none";
+        string brain = owner.Brain?.BaseBrain?.ShortName() ?? "?";
+        bool pressure = SAINExternal.IsBotUnderCombatPressure(owner);
+        string reason = DescribeBigBrainDiagReason(bot, owner, layer, pressure);
+
+        string msg =
+            $"[SAIN DIAG][BigBrain]{(mismatch ? "" : "[sample]")} {owner.name} brain={brain} layer=\"{layer}\" " +
+            $"reason={reason} SAINLayersActive={bot.SAINLayersActive} SAINActiveLayer={bot.ActiveLayer} " +
+            $"pressure={pressure} GoalEnemy={goal} Combat={bot.Decision.CurrentCombatDecision} Squad={bot.Decision.CurrentSquadDecision}";
+
+        if (infoOnly)
+        {
+            Logger.LogInfo(msg);
+        }
+        else
+        {
+            Logger.LogWarning(msg);
+        }
+    }
+
+    private static string DescribeBigBrainDiagReason(BotComponent bot, BotOwner owner, string layer, bool pressure)
+    {
+        bool sainCombat =
+            string.Equals(layer, CombatSoloLayer.Name, StringComparison.Ordinal)
+            || string.Equals(layer, CombatSquadLayer.Name, StringComparison.Ordinal);
+        if (sainCombat)
+        {
+            return "sainCombatLayer";
+        }
+
+        if (LooksLikeThirdPartyOrVanillaLayer(layer))
+        {
+            return "thirdPartyOrVanilla";
+        }
+
+        if (string.Equals(layer, ExtractLayer.Name, StringComparison.Ordinal))
+        {
+            return "sainExtract";
+        }
+
+        if (pressure && !sainCombat)
+        {
+            return "combatPressureNonSainCombat";
+        }
+
+        return "otherNonCombat";
+    }
+
+    private static bool LooksLikeThirdPartyOrVanillaLayer(string activeLayer)
+    {
+        if (string.IsNullOrEmpty(activeLayer))
+        {
+            return false;
+        }
+
+        if (activeLayer.Contains("quest", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (activeLayer.Contains("Loot", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (activeLayer.Contains("Navigate", StringComparison.OrdinalIgnoreCase)
+            || activeLayer.Contains("Navigation", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (activeLayer.Contains("Patrol", StringComparison.OrdinalIgnoreCase)
+            || activeLayer.Contains("Stationary", StringComparison.OrdinalIgnoreCase)
+            || activeLayer.Contains("StandBy", StringComparison.OrdinalIgnoreCase)
+            || activeLayer.Contains("Peace", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsNearAnyHuman(Vector3 botPos, HashSet<PlayerComponent> humans)
@@ -225,7 +309,7 @@ public class BotManagerComponent : MonoBehaviour
         return false;
     }
 
-    private static bool LooksLikePriorityMismatch(BotComponent bot, string activeLayer)
+    private static bool LooksLikePriorityMismatch(BotComponent bot, BotOwner owner, string activeLayer)
     {
         if (string.IsNullOrEmpty(activeLayer))
         {
@@ -236,20 +320,28 @@ public class BotManagerComponent : MonoBehaviour
             string.Equals(activeLayer, CombatSoloLayer.Name, StringComparison.Ordinal)
             || string.Equals(activeLayer, CombatSquadLayer.Name, StringComparison.Ordinal);
 
-        bool obviousQuestDriving =
-            activeLayer.IndexOf("quest", StringComparison.OrdinalIgnoreCase) >= 0;
-
         bool hasThreatSignals =
             bot.GoalEnemy != null
             || bot.Decision.CurrentCombatDecision != ECombatDecision.None
-            || bot.Decision.CurrentSquadDecision != ESquadDecision.None;
+            || bot.Decision.CurrentSquadDecision != ESquadDecision.None
+            || SAINExternal.IsBotUnderCombatPressure(owner);
 
         if (!hasThreatSignals)
         {
             return false;
         }
 
-        return obviousQuestDriving || !sainCombatDriving;
+        if (sainCombatDriving)
+        {
+            return false;
+        }
+
+        if (LooksLikeThirdPartyOrVanillaLayer(activeLayer))
+        {
+            return true;
+        }
+
+        return SAINExternal.IsBotUnderCombatPressure(owner);
     }
 
     public void Dispose()

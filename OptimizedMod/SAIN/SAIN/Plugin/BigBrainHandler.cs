@@ -29,6 +29,11 @@ public static class BigBrainHandler
         "Enemy Building",
         "PushAndSup",
         "Pursuit",
+        // Stationary / patrol-style vanilla layers (EFT build–dependent names). Extend from [SAIN DIAG] + active layer logs when missing.
+        "StationaryWS",
+        "StationaryWeapon",
+        "PatrolAssault",
+        "SimplePatrol",
     ];
 
     private static readonly List<Type> _SAINLayers = [];

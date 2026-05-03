@@ -110,7 +110,7 @@ The C# code provides the **default** used when no config JSON exists. The JSON *
 ## Verification
 
 1. Restart SPT, start Lighthouse raid
-2. Enable F12 → SAIN Performance → `5. Diagnostic Logging`
+2. Enable **F12 → SAINPerfLog → `SAINPerfLog (F12)` → `2. Diagnostic Logging`**
 3. Approach bots and shoot at them
 4. Bots should **immediately return fire, seek cover, and flank** — no patrol/freeze behavior
 5. Check `BepInEx/LogOutput.log` for `[SAIN DIAG] TierChange:` entries — bots near you should transition from Occluded/Audible → Visible when combat starts

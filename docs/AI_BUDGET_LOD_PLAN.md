@@ -2,6 +2,8 @@
 
 This document captures the **target behavior**, **why STALKER Anomaly comparisons differ**, **how current SAIN code aligns**, and a **checklist** for closing gaps. It complements the implementation detail in [PERFORMANCE_ARCHITECTURE.md](PERFORMANCE_ARCHITECTURE.md).
 
+**Agents:** [INDEX.md](../INDEX.md) · [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Target goal
@@ -36,13 +38,13 @@ So the gap is not “budget bad,” but **what we throttle** (whole bot vs subsy
 | Subsystem Hz knobs | [`OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs`](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs) | Vision / look / cover-find frequencies, raycast LOD, far-bot CPU reduction multipliers. |
 | Human engagement ordering within tier | [`AIFrameBudgetScheduler.SortTierByCombatPriority`](../OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs) | Sorts by distance when **GoalEnemy is human** — **priority within tier**, not a skip exemption. |
 | Squad vs solo jitter (related) | [`SquadCombatCoordinator`](../OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs), [`CombatSquadLayer`](../OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs) | Coordinator **does not** call `SetSquadDecision` when `CurrentCombatDecision != None`; squad layer **only** active when `CurrentCombatDecision == None` and squad decision set — reduces BigBrain priority fights and solo wipes from coordinator. |
-| **Preset-driven AI frame budget** | [`PerformanceSettings.MaxAiBudgetMilliseconds`](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs), [`BotManagerComponent.SyncAiFrameBudgetFromPreset`](../OptimizedMod/SAIN/SAIN/Components/BotManagerComponent.cs) | Each `ManualUpdate`, preset value (clamp **1–10**) syncs to **`AIFrameBudgetScheduler.MaxAIBudgetMs`** and **`SAINPerformanceMonitor.BudgetLimitMs`** (F12 / CSV match scheduler). |
+| **Preset-driven AI frame budget** | [`PerformanceSettings.MaxAiBudgetMilliseconds`](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs), [`BotManagerComponent.SyncAiFrameBudgetFromPreset`](../OptimizedMod/SAIN/SAIN/Components/BotManagerComponent.cs) | Each `ManualUpdate`, preset value (clamp **1–10**) syncs to **`AIFrameBudgetScheduler.MaxAIBudgetMs`** (F12 readouts + CSV rows read the same scheduler instance via **SAINPerfLog**). |
 
 ### Gaps vs the stated goal (still open)
 
 | Gap | Detail |
 |-----|--------|
-| **Interpretation: perf CSV vs “feel”** | Sample **`sain_perf.csv`** every ~5 s may show **low budget utilization** while subjective jitter persists — causes can include **BigBrain layer arbitration** (e.g. QuestingBots above SAIN combat), **whole-bot skips** between samples, or **vanilla/EFT** load — correlate with **`BudgetExhausted%`** and active brain layer before blaming ms cap alone. |
+| **Interpretation: perf CSV vs “feel”** | Sampling **SAINPerfLog** per-raid perf CSV (e.g. every ~5 s) may show **low budget utilization** while subjective jitter persists — causes can include **BigBrain layer arbitration** (e.g. QuestingBots above SAIN combat), **whole-bot skips** between samples, or **vanilla/EFT** load — correlate with **`BudgetExhausted%`** and active brain layer before blaming ms cap alone. |
 | **Whole-bot skips** | Under load, bots **may miss full `ManualUpdate`** frames. That conflicts with “player-visible behaves normal” unless visibility tier stays sparse or budget is large — subsystem LOD would be safer for fidelity. |
 | **No hard guarantee for visible combatants** | Combat priority is **sort-only**; **no** rule like “always process Visible tier bots targeting player this frame” or “minimum ticks/sec.” |
 | **Tier slice caps Visible work** | Visible tier stops increasing elapsed time at **~45%** of `MaxAIBudgetMs` before Audible runs — many Visible bots still **rotate** across frames. |
@@ -55,8 +57,8 @@ So the gap is not “budget bad,” but **what we throttle** (whole bot vs subsy
 ### Phase A — Observable tuning (low risk) — **done in repo**
 
 1. ~~Add **`MaxAiBudgetMilliseconds`**~~ → implemented with **`[MinMax(1f, 10f, 0.5f)]`**, default **2** (`PerformanceSettings`).
-2. ~~Sync scheduler + perf monitor~~ → **`SyncAiFrameBudgetFromPreset()`** in **`Activate`** and **`ManualUpdate`** (`BotManagerComponent`).
-3. Verify with **`SAINPerformanceMonitor.DiagnosticLogging`**: `BudgetExhaustedLastFrame`, skipped bot counts, exhaustion rate vs jitter (still recommended after preset tweaks).
+2. ~~Sync scheduler~~ → **`SyncAiFrameBudgetFromPreset()`** in **`Activate`** and **`ManualUpdate`** (`BotManagerComponent`).
+3. Verify with **`SainPerfLogInterop`** diagnostics ON (**SAINPerfLog → SAINPerfLog (F12) → Diagnostic Logging**): `BudgetExhaustedLastFrame`, skipped bot counts, exhaustion rate vs jitter (still recommended after preset tweaks).
 
 ### Phase B — Fidelity where it matters (medium risk)
 

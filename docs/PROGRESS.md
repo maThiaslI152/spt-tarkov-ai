@@ -1,19 +1,22 @@
 # SPT Tarkov AI — Progress Report
 
-> Last updated: 2026-05-03 (pre-build doc pass) | State: Single-tree SAIN sources under `OptimizedMod/SAIN/SAIN/`
+> Last updated: 2026-05-05 | State: Single-tree SAIN under `OptimizedMod/SAIN/SAIN/`; raid perf CSV + F12 telemetry live in **`SAINPerfLog`**; SMART **offline slice** in **[SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md)**; BigBrain + Rogue **scope/status** in **[STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md)**
+
+**Navigation (agents):** [INDEX.md](../INDEX.md) (full map) · [AGENTS.md](AGENTS.md) (read order, builds, hot paths)
 
 ## Pre-build checklist (2026-05-03)
 
 | Area | Status | Notes |
 |------|--------|--------|
 | Squad coordinator vs solo combat | Implemented | [`SquadCombatCoordinator`](SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs): skip `SetSquadDecision` when `CurrentCombatDecision != None`. [`CombatSquadLayer`](SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs): active only when `CurrentCombatDecision == None`. Reduces passive suppress/follow and run-stop jitter from coordinator wiping solo decisions. |
-| AI frame budget preset | Implemented | [`PerformanceSettings.MaxAiBudgetMilliseconds`](SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs); [`BotManagerComponent.SyncAiFrameBudgetFromPreset`](SAIN/SAIN/Components/BotManagerComponent.cs) syncs scheduler + perf monitor. Tune **2–6 ms** in preset if needed. |
+| AI frame budget preset | Implemented | [`PerformanceSettings.MaxAiBudgetMilliseconds`](SAIN/SAIN/Preset/GlobalSettings/Categories/General/PerformanceSettings.cs); [`BotManagerComponent.SyncAiFrameBudgetFromPreset`](SAIN/SAIN/Components/BotManagerComponent.cs) syncs **`AIFrameBudgetScheduler`**. Tune **2–6 ms** in preset if needed. |
 | Perf CSV interpretation | Documented | Low **`BudgetUtil%`** / **`BudgetExhausted%`** does not rule out **BigBrain priority** issues (e.g. QuestingBots). See [AI_BUDGET_LOD_PLAN.md](AI_BUDGET_LOD_PLAN.md). |
 | QuestingBots + combat | Implemented + documented | `SAINExternal.IsBotInCombat` hardened (under-fire recency, QB threat signals, null guards) so `CanBotQuest` blocks better during combat pressure. See [INTEGRATION.md](INTEGRATION.md), [SPTQuestingBots.md](SPTQuestingBots.md), and [BUGFIX-BigBrainPriority-QuestingBots.md](BUGFIX-BigBrainPriority-QuestingBots.md). |
-| BigBrain priority diagnostics | Implemented | Minimal `[SAIN DIAG][BigBrain]` arbitration hints added in `BotManagerComponent` (rate-limited, nearby-human filtered, gated by `DiagnosticLogging`) to capture active layer mismatch vs combat signals. See [BUGFIX-BigBrainPriority-QuestingBots.md](BUGFIX-BigBrainPriority-QuestingBots.md). |
+| BigBrain audit (layer matrix + diagnostics + strips) | Implemented | [`BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md) inventories registration/strip lists. `[SAIN DIAG][BigBrain]` expanded: `brain=`, `reason=`, `pressure=`, `SAINActiveLayer=`; optional **SAINPerfLog F12 → `3. BigBrain verbose sample`**; mismatch heuristics cover quest/loot/nav/patrol/stationary substrings; no longer requires QuestingBots loaded. `SAINExternal.IsBotUnderCombatPressure` for shared threat predicate. Extra vanilla strip names (`StationaryWS`, …). See [BUGFIX-BigBrainPriority-QuestingBots.md](BUGFIX-BigBrainPriority-QuestingBots.md), [INTEGRATION.md](INTEGRATION.md) restart note. |
 | Build | Run before deploy | `dotnet build OptimizedMod/SAIN/SAIN.csproj -c Release` |
-| Perf logging quality | Implemented | `SAINPerformanceMonitor` now records **instant exhaustion flag**, **budget headroom**, and **processed/skipped bots** in CSV + verbose log; runtime toggling of CSV now opens/closes writer safely. `SAINPlugin` F12 read-only strings now show headroom, instant exhaustion, and processed/skipped counts. |
+| Perf logging quality | Implemented (standalone) | **`SAINPerfLog`** owns per-raid CSV under `BepInEx/LogOutput/sain_perf/` (no overwrite), optional BigBrain aggregate snapshots, **F12 read-only scheduler lines**, and the **diagnostic logging** toggle. SAIN exposes no perf/F12 config; spammy traces read the toggle via `SainPerfLogInterop` (`OptimizedMod/SAIN/SAIN/Interop/SainPerfLogInterop.cs`, reflection, no circular reference). **Canonical doc:** [SAIN_PERFLOG.md](SAIN_PERFLOG.md). |
 | Rogue base-defense coordination (`ExUsec`) | Implemented (build-verified) | Added Rogue-only squad leader election (hysteresis + deterministic tie-break), order TTL/cancel lifecycle, Lighthouse scope guard, and LootingBots anti-loot interop suppression while in base-defense mode. Configurable via `General -> Rogue Base Defense` settings. See [ROGUE_BASE_DEFENSE_PLAN.md](ROGUE_BASE_DEFENSE_PLAN.md). |
+| SMART offline combat (slice) | Implemented (code) + doc | Auto `OfflineSquad` sync, statistical Phase 0, procedural audio; **not** full dematerialize/materialize. See [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md), [INDEX.md](../INDEX.md) doc map. |
 
 ---
 
@@ -22,6 +25,36 @@
 All Phases 1–4 have been implemented in the `OptimizedMod/` forked source files.
 **Build verified today** — 9 of 10 client mods compile with 0 errors and are deployed to SPT.
 Two items remain blocked pending SPT runtime on Windows.
+
+---
+
+## 2026-05-05 Session: BigBrain + Rogue — status doc and index
+
+### Delivered
+
+| Area | Notes |
+|------|--------|
+| **Status narrative** | New **[STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md)** — problems addressed, features shipped, **Rogue-only vs global vanilla strip** table, build commands, open runtime follow-ups. |
+| **Rogue plan clarity** | [ROGUE_BASE_DEFENSE_PLAN.md](ROGUE_BASE_DEFENSE_PLAN.md) already clarifies posture vs BigBrain layer names; status doc links it for discoverability. |
+| **INDEX** | [INDEX.md](../INDEX.md) documentation map row → `STATUS_BIGBRAIN_AND_ROGUE.md`. |
+
+---
+
+## 2026-05-04 Session: SMART offline combat — shipped slice + documentation
+
+### Delivered
+
+| Area | Notes |
+|------|--------|
+| **Auto offline squads** | `OfflineSquadWorldSync` registers `auto_*` squads from qualifying occluded AI-vs-AI pairs; `BotManagerComponent` calls sync before `ProcessFrame`; `ResetForNewRaid` on activate. |
+| **Casualty trim** | `AIFrameBudgetScheduler` skips `ApplyOfflineCasualties` member removal for `auto_*` squads. |
+| **Audio** | `CombatAudioSpoofer` uses a cached procedural `AudioClip` + `PlayClipAtPoint` (audible without external assets). |
+| **Materialization** | Stub only: `OfflineSquadMaterialization.TryBeginMaterialize` returns `false`. |
+| **Docs** | New **[SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md)** (status vs full SMART, roadmap, observability). **INDEX.md** links this doc. |
+
+### Still open (full SMART)
+
+Dematerialization of far fights, offline→online spawn/state handoff, EFT-native gunfire audio, and reconciliation with real bot deaths/loot — see **SMART_OFFLINE_COMBAT.md** § “What is not implemented” and § “Future development”.
 
 ---
 
@@ -52,6 +85,15 @@ The inner `SAIN/SAIN/` project (which actually compiles) was missing the budget 
 
 All DLLs deployed to `E:\SPT 4.0 Dev\BepInEx\plugins\` via post-build copy.
 
+### Follow-up: SAINPerfLog owns F12 + diagnostics (same stack)
+
+| Area | Change |
+|------|--------|
+| `SAIN/SAIN/SAINPlugin.cs` | Removed **entire** legacy **SAIN Performance** / F12 block (`PerfMon*`, `SyncPerfMonitor`, rolling average). |
+| `SAINPerfLog/PerfLogPlugin.cs` | Added **`SAINPerfLog (F12)`** config category: status lines, diagnostic toggle, scheduler readouts; exposes `public static bool DiagnosticLoggingEnabled` for SAIN. |
+| `SAIN/SAIN/Interop/SainPerfLogInterop.cs` | SAIN code gates diagnostics via reflection on that field when `me.sol.sain.perflog` is loaded. |
+| `SAIN/SAIN/Components/SAINPerformanceMonitor.cs` | **Removed** from shipping SAIN tree (CSV + F12 previously tied here). |
+
 ---
 
 ## Completed Phases
@@ -74,8 +116,10 @@ All DLLs deployed to `E:\SPT 4.0 Dev\BepInEx\plugins\` via post-build copy.
 | 2.1 LOD raycast reduction | `SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs:171-179`     | Far tier → 1 raycast; VeryFar/Narnia → skipped entirely                               |
 | 2.2 Budget Scheduler      | `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` | 2ms hard cap, Visible→Audible→Occluded priority tiers. Wired into BotManagerComponent |
 | 2.5 Perception LOD        | `SAIN/SAIN/Classes/Bot/SAINAILimit.cs`           | Player-centric: camera frustum + single raycast visibility; gunfire/sprint audibility |
-| 2.5 Offline Combat        | `OptimizationCore/OfflineCombatResolver.cs`  | Statistical power formula with fog-of-war randomness                                  |
-| 2.5 Combat Audio          | `SAIN/SAIN/Components/CombatAudioSpoofer.cs`     | Coroutine-based gunshot scheduling, distance attenuation, BetterAudio+fallback paths  |
+| 2.5 Offline Combat        | `SAIN/SAIN/Components/OfflineCombatResolver.cs` (+ ref `OptimizationCore/`) | Statistical power formula with fog-of-war randomness |
+| 2.5 Offline squad sync    | `SAIN/SAIN/Components/OfflineSquadWorldSync.cs` + `BotManagerComponent` | **Auto** `RegisterOfflineSquad` from occluded AI-vs-AI pairs (~5 s); `auto_*` squads skip list casualty trim |
+| 2.5 Combat Audio          | `SAIN/SAIN/Components/CombatAudioSpoofer.cs` | Coroutine scheduling + distance attenuation; **procedural** `AudioClip` fallback + `PlayClipAtPoint` (BetterAudio TBD) |
+| 2.5 Materialization stub  | `SAIN/SAIN/Components/OfflineSquadMaterialization.cs` | API placeholder; offline→online **not** implemented |
 
 
 ### Phase 3: Squad Collapse ✓
@@ -98,15 +142,15 @@ All DLLs deployed to `E:\SPT 4.0 Dev\BepInEx\plugins\` via post-build copy.
 | 4.2 State reset  | SAIN BotComponent, LootingBots/LootingBrain   | Full AI state reset on pool recycle               |
 
 
-### New: F12 Performance Monitor ✓ (WIRED ✓)
+### Raid telemetry + F12 status ✓ (SAINPerfLog)
 
 
 | Task              | File                                   | What Changed                                                                           |
 | ----------------- | -------------------------------------- | -------------------------------------------------------------------------------------- |
-| Monitor component | `SAIN/SAIN/Components/SAINPerformanceMonitor.cs` | Real-time FPS/budget/tier tracking, rolling averages                                   |
-| CSV logging       | same                                   | Writes to `BepInEx/LogOutput/sain_perf.csv` every N seconds                            |
-| F12 config        | `SAIN/SAIN/SAINPlugin.cs`              | "SAIN Performance" section: Enable, Interval, CSV, Verbose, DumpNow, + read-only stats |
-| Dump snapshots    | same                                   | Toggle "Dump Stats Now" in F12 for full performance snapshot to log                    |
+| Per-raid perf CSV | `SAINPerfLog/Components/RaidPerfCsvLogger.cs` | Appends on interval; flush/close on `GameWorld.OnDispose`; timestamped filenames under `LogOutput/sain_perf/` |
+| BigBrain snapshots | same (optional)                     | Sparse aggregate layer histogram + mismatch count; separate CSV when enabled         |
+| F12 readouts      | `SAINPerfLog/PerfLogPlugin.cs`         | Category **`SAINPerfLog (F12)`**: rolling FPS, `AIFrameBudgetScheduler` budget/bots, active CSV paths; **Diagnostic Logging** toggle |
+| SAIN diagnostic gate | `SAIN/SAIN/Interop/SainPerfLogInterop.cs` + call sites | No SAIN F12 perf UI; diagnostics off unless SAINPerfLog installed and toggle on      |
 
 
 ---
@@ -117,8 +161,9 @@ All DLLs deployed to `E:\SPT 4.0 Dev\BepInEx\plugins\` via post-build copy.
 | Task                                    | Why Blocked                                                                                              |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **Profiling baseline**                  | Needs actual gameplay with bots on Lighthouse                                                            |
-| **CombatAudioSpoofer AudioClip wiring** | Needs EFT internal audio API and asset bundle references — BetterAudio path is coded but untested        |
-| **Offline-to-online squad transition**  | Materializing offline squads as real GameObjects when player approaches — complex, needs runtime testing |
+| **CombatAudioSpoofer — EFT / BetterAudio** | Procedural Unity fallback is **in code**; **BetterAudio** + real weapon clips still need version-correct API binding and SPT raid validation. |
+| **Offline-to-online squad transition**  | Stub `OfflineSquadMaterialization`; materializing squads as real `GameObject`s / state when the player approaches — see [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md). |
+| **SMART full stack (dematerialize + reconcile)** | Far fights still use full AI on spawned bots; no stats-only replacement, no corpse/loot sync from offline rolls — roadmap in [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md). |
 | **Phase 4 pool verification**           | Harmony intercepts on `GameObject.Destroy` — must verify no crashes on live SPT                          |
 | **Full integration test**               | Lighthouse 29+ bots at 60 FPS target — needs Windows SPT                                                 |
 
@@ -131,9 +176,9 @@ All DLLs deployed to `E:\SPT 4.0 Dev\BepInEx\plugins\` via post-build copy.
 
 | File                                                  | Changes                                        |
 | ----------------------------------------------------- | ---------------------------------------------- |
-| `SAIN/SAIN/SAINPlugin.cs`                     | Added pool init, F12 perf monitor config entries, SyncPerfMonitor(), `using SAIN.Components` |
-| `SAIN/SAIN/Components/BotManagerComponent.cs` | Added BudgetScheduler wiring, perf monitor init, ProcessFrame() replacing manual for-loop |
-| `SAIN/SAIN/Components/SAINPerformanceMonitor.cs` | Changed BudgetLimitMs `private set` → `set` |
+| `SAIN/SAIN/SAINPlugin.cs`                     | Session wiring: pool init, etc. (**F12 perf block later removed** — see follow-up above). |
+| `SAIN/SAIN/Components/BotManagerComponent.cs` | BudgetScheduler wiring, `ProcessFrame()` replacing manual for-loop (perf monitor init **removed** with standalone logger). |
+| `SAIN/SAIN/Components/SAINPerformanceMonitor.cs` | **Removed** from tree after SAINPerfLog migration. |
 
 > **Note:** Legacy duplicate `.cs` trees under `OptimizedMod/SAIN/` (excluding `SAIN/` and `SAINServerMod/`) were **removed in Session 4** — all shipping edits belong under `SAIN/SAIN/` only.
 
@@ -148,12 +193,10 @@ Key paths touched: `LootingBots/LootingBots.cs`, `SAIN/SAIN/Layers/SAINLayer.cs`
 1. Build all mods: `dotnet build -c Release` from each project directory (or from `OptimizedMod/SAIN` for SAIN)
 2. Verify DLLs are in `E:\SPT 4.0 Dev\BepInEx\plugins\`
 3. Launch SPT, start a raid on Lighthouse
-4. Press **F12** → scroll to "SAIN Performance":
-  - Toggle `Monitor Enabled` ON
-  - Set `CSV Logging` ON
-  - Set `Log Interval` to 5 seconds
-  - Toggle `Dump Stats Now` ON to print snapshot
-5. After raid, check `BepInEx/LogOutput/sain_perf.csv` for data
+4. Press **F12** → open **`SAINPerfLog`** → **`SAINPerfLog (F12)`**:
+  - Leave **F12 Status Lines** ON to refresh FPS / scheduler / bot readouts
+  - Turn **Diagnostic Logging** ON only when chasing `[SAIN DIAG]` spam in `LogOutput.log`
+5. After raid, inspect **`BepInEx/LogOutput/sain_perf/`** (timestamped `sain_perf_*.csv`; optional `*_latest.csv` if enabled)
 6. Target: Lighthouse 29+ bots at 60 FPS
 
 ---
@@ -205,10 +248,10 @@ SAIN's combat layer priorities for regular bots (PMCs, Scavs, Rogues) were **20-
 | Raise combat squad priority | `LayerSettings.cs` + deployed JSON | 22 | **70** |
 | Raise combat solo priority | `LayerSettings.cs` + deployed JSON | 20 | **69** |
 | Lower extract priority | `LayerSettings.cs` + deployed JSON | 24 | **65** |
-| Add Diagnostic Logging toggle | `SAINPerformanceMonitor.cs`, `SAINPlugin.cs`, `AIFrameBudgetScheduler.cs`, `SAINAILimit.cs` | N/A | F12 config entry + `[SAIN DIAG]` prefixed logs |
+| Add Diagnostic Logging toggle | `SAINPerfLog/PerfLogPlugin.cs`, `SAIN/SAIN/Interop/SainPerfLogInterop.cs`, `AIFrameBudgetScheduler.cs`, `SAINAILimit.cs`, … | N/A | **SAINPerfLog (F12)** toggle + `[SAIN DIAG]` prefixed logs (SAIN gates via interop) |
 
 ### Diagnostic Logging Feature
-New `[SAIN DIAG]` entries in `BepInEx/LogOutput.log` when F12 → `5. Diagnostic Logging` is ON:
+New `[SAIN DIAG]` entries in `BepInEx/LogOutput.log` when **F12 → SAINPerfLog → `SAINPerfLog (F12)` → `2. Diagnostic Logging`** is ON:
 - **Tier changes:** `TierChange: Bot[Scav] Occluded → Visible (ActiveEnemy=True)`
 - **Budget status:** `OK — 1.23ms / 2ms` or `BUDGET EXHAUSTED at 2.01ms`
 - **Bot distribution:** `V=3 A=5 O=12 (processed=8, skipped=12)`

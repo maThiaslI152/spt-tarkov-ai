@@ -198,6 +198,15 @@ public static class SAINExternal
         return true;
     }
 
+    /// <summary>
+    /// Same predicate as quest-blocking combat checks: under-fire, recent under-fire, QB threat hints (if loaded), or goal-enemy visibility / recent seen / heard windows.
+    /// </summary>
+    public static bool IsBotUnderCombatPressure(BotOwner botOwner)
+    {
+        var component = GetBotComponent(botOwner);
+        return component != null && IsBotInCombat(component, out _);
+    }
+
     public static bool IsQuestTowardTarget(BotComponent component, Vector3 questPosition, float dotProductThresh)
     {
         Vector3? currentTarget = component.GoalEnemy?.LastKnownPosition;

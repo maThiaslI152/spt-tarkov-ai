@@ -2,6 +2,8 @@
 
 > **Code location:** All source code lives in `OptimizedMod/`. Paths in this document are relative to `OptimizedMod/` unless noted otherwise.
 
+**Agents:** [INDEX.md](../INDEX.md) · [AGENTS.md](AGENTS.md).
+
 ## Overview
 
 This document describes the multi-phase performance optimization applied to SAIN (Solarint's AI Modifications) for SPT (Single Player Tarkov). The optimization spans four phases across all forked mods (SAIN, BigBrain, LootingBots, Waypoints, SPT-AILimit, ABPS) with the target of running Lighthouse with 29+ bots at stable 60 FPS.
@@ -34,14 +36,14 @@ Each Frame (16.7ms at 60 FPS)
 └── Per-frame AI ms cap — tuned via SAIN preset Global → General → Performance (synced to perf CSV / F12)
 ```
 
-### Performance Logging Improvements (2026-05-03)
+### Performance logging + F12 (2026-05-03, updated)
 
-`SAINPerformanceMonitor` logging was expanded so short AI stalls are easier to diagnose:
+**`SAINPerfLog`** (`me.sol.sain.perflog`) owns per-raid CSV under `BepInEx/LogOutput/sain_perf/` and the **F12** read-only scheduler lines (**SAINPerfLog (F12)**). Rows are written by `RaidPerfCsvLogger` from the live `AIFrameBudgetScheduler` so short stalls are easier to diagnose:
 
-- CSV now includes **`BudgetExhaustedNow`** (per-sample instant flag) in addition to rolling exhaustion percent.
-- CSV now includes **`BudgetHeadroomMs`** (`BudgetLimitMs - BudgetMs`) and **`ProcessedBots` / `SkippedBots`**.
-- Runtime F12 toggling of CSV is now robust: enabling CSV creates writer/header; disabling closes writer.
-- F12 read-only fields now expose headroom, instant exhaustion, and processed/skipped counts.
+- CSV includes **`BudgetExhaustedNow`** (per-row instant flag) alongside rolling exhaustion percent.
+- CSV includes **`BudgetHeadroomMs`** and **`ProcessedBots` / `SkippedBots`** (and V/A/O/offline counts aligned with the scheduler).
+- Raid lifecycle opens/closes writers deterministically (no fixed-path overwrite across raids).
+- F12 exposes the same rolling FPS + budget/bot counters the logger samples (plus active CSV paths while in-raid).
 
 This helps distinguish “low average budget use” from brief spikes where skipped updates correlate with visible jitter.
 
@@ -233,7 +235,11 @@ Implemented in `BotComponent.ManualUpdate()` lines 189-220.
 
 **Files:**
 - `SAIN/SAIN/Components/OfflineCombatResolver.cs` — statistical combat model
-- `SAIN/SAIN/Components/CombatAudioSpoofer.cs` — spoofed gunfire audio
+- `SAIN/SAIN/Components/CombatAudioSpoofer.cs` — spoofed gunfire audio (procedural clip + `PlayClipAtPoint`; BetterAudio TBD)
+- `SAIN/SAIN/Components/OfflineSquadWorldSync.cs` — auto `RegisterOfflineSquad` from occluded AI-vs-AI pairs (`auto_*` ids)
+- `SAIN/SAIN/Components/OfflineSquadMaterialization.cs` — reserved hook for offline→online (stub)
+
+**Implementation status vs full SMART:** see **[SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md)**.
 
 **How offline combat works:**
 
@@ -270,8 +276,8 @@ int casualtiesB = round(winRatio × squadB.Count)
 **Audio spoofing:**
 - Combat duration: 3-15 seconds (longer for balanced fights)
 - Shot density: ~3 shots per second
-- Distance attenuation: full fidelity < 100m, muffled at 300m, silent beyond 500m
-- Audio flows through EFT's `BetterAudio` singleton
+- Distance attenuation: volume falls off with distance to the listener (see `CombatAudioSpoofer`)
+- **Shipped:** procedural `AudioClip` + Unity `PlayClipAtPoint`. **Future:** EFT `BetterAudio` when API is confirmed for the target client.
 
 **How to use:**
 ```csharp

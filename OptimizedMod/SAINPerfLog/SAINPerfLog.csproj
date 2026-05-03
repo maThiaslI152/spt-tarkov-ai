@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SAINPerfLog</RootNamespace>
+    <AssemblyName>SAINPerfLog</AssemblyName>
+    <ReleaseOutputDir>$(SPTRoot)\BepInEx\plugins\SAINPerfLog\</ReleaseOutputDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Configurations>Debug;Release</Configurations>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(SPTCore)\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(SPTCore)\BepInEx.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(SPTManaged)\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SPTManaged)\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(SPTManaged)\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(SPTManaged)\Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Comfort">
+      <HintPath>$(SPTManaged)\Comfort.dll</HintPath>
+    </Reference>
+    <Reference Include="spt-reflection">
+      <HintPath>$(SPTSPT)\spt-reflection.dll</HintPath>
+    </Reference>
+    <Reference Include="DrakiaXYZ-BigBrain">
+      <HintPath>$(SPTRoot)\BepInEx\plugins\DrakiaXYZ-BigBrain.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SAIN\SAIN\SAIN.csproj" />
+  </ItemGroup>
+
+  <Target Name="CleanUnwantedFiles" AfterTargets="Build">
+    <ItemGroup>
+      <UnwantedFiles Include="$(OutputPath)*.pdb; $(OutputPath)*.deps.json; $(OutputPath)*.dll" Exclude="$(OutputPath)SAINPerfLog.dll" />
+    </ItemGroup>
+    <Delete Files="@(UnwantedFiles)" />
+  </Target>
+
+  <Target Name="CopyBuildOutput" AfterTargets="CleanUnwantedFiles">
+    <MakeDir Directories="$(ReleaseOutputDir)" />
+    <ItemGroup>
+      <RemainingFiles Include="$(OutputPath)**\*" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(RemainingFiles)"
+      DestinationFiles="@(RemainingFiles->'$(ReleaseOutputDir)%(RecursiveDir)%(Filename)%(Extension)')"
+    />
+  </Target>
+</Project>

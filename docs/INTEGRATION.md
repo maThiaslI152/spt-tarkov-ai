@@ -3,13 +3,15 @@
 > **Code location:** All source code lives in `OptimizedMod/`. File paths in this document use original mod names for clarity — actual files are under `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.  
 > This document maps how the AI mods in this workspace interoperate. It is designed to be extensible — as new mods are added, their integration points can be appended.
 
+**AI agents:** start at [INDEX.md](../INDEX.md); for read order and build commands see [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Table of Contents
 
 1. [Integration Overview](#integration-overview)
 2. [How BigBrain Controls Tarkov's Unity Bot System](#how-bigbrain-controls-tarkovs-unity-bot-system)
-3. [SAIN ↔ BigBrain](#sain--bigbrain)
+3. [SAIN ↔ BigBrain](#sain--bigbrain) — see also [STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md) (problems vs features, Rogue-only vs global strips)
 4. [LootingBots ↔ BigBrain](#lootingbots--bigbrain)
 5. [SAIN ↔ LootingBots](#sain--lootingbots)
 6. [Waypoints ↔ Ecosystem](#waypoints--ecosystem)
@@ -227,16 +229,19 @@ For example, PMCs use brains like `"PmcBear"`, `"PmcUsec"`, etc.
 SAIN then removes the vanilla combat layers so they don't compete with SAIN's behavior:
 
 ```csharp
-// Vanilla layers removed for all bot types:
+// Vanilla layers removed for all bot types (abbreviated — full list in BigBrainHandler + BIGBRAIN_LAYER_MATRIX.md):
 string[] _commonVanillaLayersToRemove = [
     "Help", "AdvAssaultTarget", "AssaultEnemyFar", "Hit",
     "Simple Target", "Pmc", "AssaultHaveEnemy", "Assault Building",
     "Enemy Building", "PushAndSup", "Pursuit",
+    // + stationary/patrol-style names (EFT build–dependent), e.g. StationaryWS, …
 ];
 ```
 
 Each bot type has additional type-specific vanilla layers removed (e.g., boss fight layers,
 knight fight layers, etc.).
+
+**Restart requirement:** `BigBrainHandler.Init()` runs only from `SAINPlugin.Awake()` (game start). Changing **`LayerSettings`** priorities or **`VanillaBotSettings`** toggles in the BepInEx UI does **not** re-register or re-strip layers until you **fully restart the game**. See [`docs/BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md) for the full brain / layer matrix.
 
 ### Runtime Lifecycle
 

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using EFT;
 using LootingBots;
 using SAIN.Components;
+using SAIN.Interop;
 using SAIN.Models.Enums;
 using SAIN.Plugin;
 using SAIN.Preset.GlobalSettings;
@@ -448,7 +449,7 @@ public static class SquadCombatCoordinator
 
     private static void LogDiag(string message)
     {
-        if (SAINPerformanceMonitor.Instance?.DiagnosticLogging == true)
+        if (SainPerfLogInterop.IsDiagnosticLoggingEnabled)
         {
             Logger.LogInfo(message);
         }
