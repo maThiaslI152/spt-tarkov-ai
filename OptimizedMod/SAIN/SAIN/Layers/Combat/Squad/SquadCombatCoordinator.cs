@@ -29,6 +29,44 @@ public static class SquadCombatCoordinator
     }
 
     /// <summary>
+    /// When true, <see cref="CombatSquadLayer"/> may call <see cref="CoordinateSquad"/> even though
+    /// <see cref="SAIN.SAINComponent.Classes.Decision.SAINDecisionClass.CurrentSquadDecision"/> is still <see cref="ESquadDecision.None"/>.
+    /// Fixes a bootstrap deadlock: initial rogue defense orders are issued inside coordination, but the layer
+    /// previously required a non-None squad decision to become active.
+    /// </summary>
+    public static bool ShouldBootstrapRogueDefenseCombatLayer(BotComponent bot)
+    {
+        if (bot?.Squad?.SquadInfo?.Members == null)
+        {
+            return false;
+        }
+
+        RogueBaseDefenseSettings settings = SAINPlugin.LoadedPreset?.GlobalSettings?.General?.RogueBaseDefense;
+        if (settings == null || !settings.EnableRogueBaseDefensePolicy)
+        {
+            return false;
+        }
+
+        if (!IsRogueDefenseContext(bot, settings))
+        {
+            return false;
+        }
+
+        if (bot.Squad.SquadInfo.Members.Count <= 1)
+        {
+            return false;
+        }
+
+        BotComponent vanillaLeader = bot.Squad.LeaderComponent;
+        if (vanillaLeader == null || !IsRogueDefenseContext(vanillaLeader, settings))
+        {
+            return false;
+        }
+
+        return bot.Decision.CurrentSquadDecision == ESquadDecision.None;
+    }
+
+    /// <summary>
     /// Coordinate squad combat: distribute targets, assign flanks, coordinate suppression.
     /// Called by the squad leader's CombatSquadLayer each frame (throttled internally).
     /// </summary>
@@ -80,8 +118,14 @@ public static class SquadCombatCoordinator
                 SuppressRogueLooting(squad, state, settings);
             }
 
+            bool activeHumanContact = HasAnyActiveHumanThreat(squad);
             if (allEnemies.Count == 0)
             {
+                if (activeHumanContact)
+                {
+                    ApplyRogueActiveContactOrders(squad, state, settings);
+                    return;
+                }
                 ApplyRogueDefenseOrders(squad, electedLeader, state, settings);
                 return;
             }
@@ -122,6 +166,22 @@ public static class SquadCombatCoordinator
                     allEnemies.Add(enemy);
                 }
             }
+
+            // Include recently seen/heard enemies so coordination does not collapse to
+            // pure search movement right after contact is briefly broken.
+            foreach (var enemy in member.EnemyController.KnownEnemies)
+            {
+                if (enemy == null || !enemy.Seen && !enemy.Heard)
+                {
+                    continue;
+                }
+
+                bool recentlyTracked = enemy.TimeSinceSeen < 8f || enemy.TimeSinceHeard < 8f;
+                if (recentlyTracked && seenProfiles.Add(enemy.EnemyProfileId))
+                {
+                    allEnemies.Add(enemy);
+                }
+            }
         }
 
         return allEnemies;
@@ -142,15 +202,18 @@ public static class SquadCombatCoordinator
         if (allEnemies.Count == 0 || squad.Members.Count == 0)
             return;
 
+        bool aggressiveHumanContact = settings != null && HasAnyActiveHumanThreat(squad);
+
         foreach (var member in squad.Members.Values)
         {
             if (member == null || !member.BotActive || member.IsDead)
                 continue;
 
-            // Do not call SetSquadDecision — it clears solo combat to None and lets squad layer outrank solo.
-            // Preserve EnemyDecisions output while this bot already has an active combat decision.
-            if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
-                continue;
+            // Do not skip members with active combat decisions. The squad coordinator
+            // must distribute targets continuously during combat so every member has
+            // a distinct assignment and the squad layer stays active.  The coordinator's
+            // orders are authoritative — SetSquadDecision preserves any existing combat
+            // decision so the solo layer remains active alongside the squad layer.
 
             // Find the closest enemy to this member
             Enemy closest = null;
@@ -170,8 +233,22 @@ public static class SquadCombatCoordinator
             if (closest != null)
             {
                 ESquadDecision squadDecision = ESquadDecision.None;
+
+                // For rogue defense under active player contact, keep pressure with
+                // suppress/push orders instead of defaulting to long-range search.
+                if (aggressiveHumanContact)
+                {
+                    if (closestDist < 400f) // ~20m
+                    {
+                        squadDecision = ESquadDecision.PushSuppressedEnemy;
+                    }
+                    else
+                    {
+                        squadDecision = ESquadDecision.Suppress;
+                    }
+                }
                 // Suppress if enemy is within effective range but behind cover
-                if (closestDist < 1600f && !closest.IsVisible) // ~40m
+                else if (closestDist < 1600f && !closest.IsVisible) // ~40m
                 {
                     squadDecision = ESquadDecision.Suppress;
                 }
@@ -212,6 +289,8 @@ public static class SquadCombatCoordinator
         if (allEnemies.Count == 0 || squad.Members.Count < 2)
             return;
 
+        bool aggressiveHumanContact = settings != null && HasAnyActiveHumanThreat(squad);
+
         // Calculate enemy centroid
         Vector3 enemyCentroid = Vector3.zero;
         foreach (var enemy in allEnemies)
@@ -240,15 +319,56 @@ public static class SquadCombatCoordinator
             for (int i = 1; i < sortedMembers.Count; i++)
             {
                 var member = sortedMembers[i];
-                if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
-                    continue;
                 if (member.HasEnemy && member.GoalEnemy != null)
                 {
-                    member.Decision.DecisionManager.SetSquadDecision(ESquadDecision.Search);
-                    state.LastOrder = ESquadDecision.Search;
+                    ESquadDecision flankOrder = aggressiveHumanContact
+                        ? ESquadDecision.Suppress
+                        : ESquadDecision.Search;
+                    member.Decision.DecisionManager.SetSquadDecision(flankOrder);
+                    state.LastOrder = flankOrder;
                     state.OrderExpireTime = Time.time + (settings?.RogueOrderTtlSeconds ?? 4f);
                 }
             }
+        }
+    }
+
+    private static bool HasAnyActiveHumanThreat(SAIN.BotController.Classes.Squad squad)
+    {
+        foreach (var member in squad.Members.Values)
+        {
+            if (member == null || !member.BotActive || member.IsDead)
+            {
+                continue;
+            }
+
+            var enemyController = member.EnemyController;
+            if (enemyController.ActiveHumanEnemy || enemyController.HumanEnemyInLineofSight)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void ApplyRogueActiveContactOrders(
+        SAIN.BotController.Classes.Squad squad,
+        SquadCoordState state,
+        RogueBaseDefenseSettings settings
+    )
+    {
+        foreach (var member in squad.Members.Values)
+        {
+            if (!IsRogueMemberEligible(member))
+            {
+                continue;
+            }
+
+            ESquadDecision order = member.HasEnemy && member.GoalEnemy != null && member.GoalEnemy.RealDistance < 20f
+                ? ESquadDecision.PushSuppressedEnemy
+                : ESquadDecision.Suppress;
+            member.Decision.DecisionManager.SetSquadDecision(order);
+            state.LastOrder = order;
+            state.OrderExpireTime = Time.time + settings.RogueOrderTtlSeconds;
         }
     }
 
@@ -263,10 +383,6 @@ public static class SquadCombatCoordinator
         foreach (var member in squad.Members.Values)
         {
             if (!IsRogueMemberEligible(member))
-            {
-                continue;
-            }
-            if (member.Decision.CurrentCombatDecision != ECombatDecision.None)
             {
                 continue;
             }
@@ -405,6 +521,47 @@ public static class SquadCombatCoordinator
         return state;
     }
 
+    /// <summary>
+    /// Exposes the coordinator state for a given bot's squad, used by <see cref="CombatSquadLayer.IsActive"/>
+    /// to check for unexpired orders when the 10 Hz pipeline has not yet set a squad decision.
+    /// </summary>
+    public static SquadCoordState GetSquadState(BotComponent bot)
+    {
+        var squad = bot?.Squad?.SquadInfo;
+        if (squad == null || string.IsNullOrEmpty(squad.Id))
+            return null;
+        if (SquadStates.TryGetValue(squad.Id, out SquadCoordState state))
+            return state;
+        return null;
+    }
+
+    /// <summary>
+    /// Exposed so CombatSquadLayer can read pending orders without coupling to internal state.
+    /// </summary>
+    public static bool HasActiveOrder(BotComponent bot)
+    {
+        var state = GetSquadState(bot);
+        return state != null
+            && Time.time < state.OrderExpireTime
+            && state.LastOrder != ESquadDecision.None;
+    }
+
+    /// <summary>
+    /// Forces the next coordination pass for the bot's squad to run on the very next leader tick.
+    /// Used when a non-leader member enters direct contact (under-fire / human LOS) so the
+    /// shared squad plan catches up immediately instead of waiting for the normal throttle window.
+    /// </summary>
+    public static void RequestImmediateRecoordination(BotComponent bot)
+    {
+        var state = GetSquadState(bot);
+        if (state == null)
+        {
+            return;
+        }
+
+        state.LastCoordinationTime = -1000f;
+    }
+
     private static void SuppressRogueLooting(
         SAIN.BotController.Classes.Squad squad,
         SquadCoordState state,
@@ -455,7 +612,7 @@ public static class SquadCombatCoordinator
         }
     }
 
-    private sealed class SquadCoordState
+    public sealed class SquadCoordState
     {
         public float LastCoordinationTime;
         public string LeaderProfileId;

@@ -3,6 +3,7 @@ using BepInEx.Logging;
 using Comfort.Common;
 using dvize.AILimit;
 using EFT;
+using SAIN.Components;
 using EFT.UI.Ragfair;
 using System.Collections.Generic;
 using System.Linq;
@@ -291,12 +292,94 @@ namespace AILimit
                 foreach (var bot in botList)
                 {
                     player = playerInfoMapping[bot.Id].Player;
-                    BotStandBy standBy = player.AIData.BotOwner.StandBy;
-                    standBy.Activate();
-                    standBy.NextCheckTime = Time.time + 10f;
-                    player.gameObject.SetActive(true);
+                    if (player == null)
+                    {
+                        continue;
+                    }
+
+                    BotOwner owner = player.AIData?.BotOwner;
+                    if (owner == null)
+                    {
+                        continue;
+                    }
+
+                    if (!TrySainRematerialize(owner))
+                    {
+                        BotStandBy standBy = owner.StandBy;
+                        standBy.Activate();
+                        standBy.NextCheckTime = Time.time + 10f;
+                        player.gameObject.SetActive(true);
+                    }
                 }
             }
+        }
+
+        private static bool TrySainDematerialize(BotOwner owner)
+        {
+            if (owner == null || owner.IsDead)
+            {
+                return false;
+            }
+
+            BotManagerComponent mgr = BotManagerComponent.Instance;
+            if (mgr?.Dematerialization == null)
+            {
+                return false;
+            }
+
+            if (!owner.gameObject.TryGetComponent(out BotComponent sainBot))
+            {
+                return false;
+            }
+
+            return mgr.Dematerialization.RequestDematerialize(sainBot, "ailimit-distance");
+        }
+
+        private static bool TrySainRematerialize(BotOwner owner)
+        {
+            if (owner == null)
+            {
+                return false;
+            }
+
+            BotManagerComponent mgr = BotManagerComponent.Instance;
+            if (mgr?.Dematerialization == null)
+            {
+                return false;
+            }
+
+            if (!owner.gameObject.TryGetComponent(out BotComponent sainBot))
+            {
+                return false;
+            }
+
+            if (!mgr.Dematerialization.IsDematerialized(sainBot.ProfileId))
+            {
+                return false;
+            }
+
+            return mgr.Dematerialization.RequestRematerialize(sainBot);
+        }
+
+        private static bool IsSainDematerializedForOwner(BotOwner owner)
+        {
+            if (owner?.gameObject == null)
+            {
+                return false;
+            }
+
+            BotManagerComponent mgr = BotManagerComponent.Instance;
+            if (mgr?.Dematerialization == null)
+            {
+                return false;
+            }
+
+            if (!owner.gameObject.TryGetComponent(out BotComponent sainBot))
+            {
+                return false;
+            }
+
+            return mgr.Dematerialization.IsDematerialized(sainBot.ProfileId);
         }
 
         private float getMinDistanceToBot(Player botPlayer)
@@ -358,10 +441,13 @@ namespace AILimit
 
                     if (player.gameObject.activeSelf == false || standBy.StandByType == BotStandByType.paused)
                     {
-                        standBy.Activate();
-                        standBy.NextCheckTime = Time.time + 10f;
-                        player.gameObject.SetActive(true);
-                        owner.BotState = EBotState.Active;
+                        if (!TrySainRematerialize(owner))
+                        {
+                            standBy.Activate();
+                            standBy.NextCheckTime = Time.time + 10f;
+                            player.gameObject.SetActive(true);
+                            owner.BotState = EBotState.Active;
+                        }
                     }
                     botCount++;
                 }
@@ -380,8 +466,13 @@ namespace AILimit
                             standBy.method_1();
                         }
                         standBy.NextCheckTime = Time.time + 1000f;
-                        player.gameObject.SetActive(false);
-                        owner.BotState = EBotState.NonActive;
+
+                        if (!TrySainDematerialize(owner))
+                        {
+                            player.gameObject.SetActive(false);
+                            owner.BotState = EBotState.NonActive;
+                        }
+
                         disabledBotsLastFrame.Add(bot);
                     }
                 }
@@ -405,16 +496,19 @@ namespace AILimit
                 if (bot.eligibleNow)
                 {
                     BotOwner owner = player.AIData.BotOwner;
-                    owner.DecisionQueue.Clear();
-                    owner.Memory.GoalEnemy = null;
-                    if (player.gameObject.activeSelf)
+                    if (!IsSainDematerializedForOwner(owner))
                     {
-                        player.gameObject.SetActive(false);
-                        owner.BotState = EBotState.NonActive;
-                    }
+                        owner.DecisionQueue.Clear();
+                        owner.Memory.GoalEnemy = null;
+                        if (player.gameObject.activeSelf)
+                        {
+                            player.gameObject.SetActive(false);
+                            owner.BotState = EBotState.NonActive;
+                        }
 #if DEBUG
-                    Logger.LogMessage("Bot # " + player.gameObject.name + " deactivated.");
+                        Logger.LogMessage("Bot # " + player.gameObject.name + " deactivated.");
 #endif
+                    }
                 }
             }
 

@@ -458,9 +458,9 @@ public class LootingBots : BaseUnityPlugin
             defaultLootPriority,
             new ConfigDescription(
                 "Priority of LootingBots' BigBrain layer (higher = wins over lower layers when both are active). "
-                    + "Use ~62 with SAIN defaults (extract ~65, combat ~69–70) so loot/peace runs above BotMind questing (~50) but combat still overrides. "
+                    + "Default ~62: above typical BotMind quest (~50–75) but below SAIN extract (~74) and combat (~77–78) so fights override loot. "
                     + "Requires new raid after change.",
-                new AcceptableValueRange<int>(40, 68),
+                new AcceptableValueRange<int>(40, 72),
                 new ConfigurationManagerAttributes { Order = 0 }
             )
         );
@@ -483,7 +483,7 @@ public class LootingBots : BaseUnityPlugin
         _patchManager.EnablePatches();
 
         int lootPriority = BigBrainLootLayerPriority.Value;
-        Logger.LogInfo($"[LootingBots] BigBrain Loot layer priority = {lootPriority} (SAIN extract~65 / combat~69–70 should stay higher)");
+        Logger.LogInfo($"[LootingBots] BigBrain Loot layer priority = {lootPriority} (SAIN extract~74 / combat~77–78 should stay higher)");
 
         BrainManager.RemoveLayer(
             "Utility peace",

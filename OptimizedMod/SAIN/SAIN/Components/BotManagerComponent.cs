@@ -79,6 +79,12 @@ public class BotManagerComponent : MonoBehaviour
     public BotHearingClass BotHearing { get; private set; }
     public AIFrameBudgetScheduler BudgetScheduler { get; private set; }
 
+    /// <summary>Recycled bot GameObjects (Phase 4 pool; Phase 2 will route AILimit through this).</summary>
+    public BotGameObjectPool Pool { get; private set; }
+
+    /// <summary>SMART dematerialize / rematerialize seam (Phase 1 API; AILimit calls in Phase 2).</summary>
+    public BotDematerializationController Dematerialization { get; private set; }
+
     private float _nextBigBrainDiagTime;
     private const float BigBrainDiagIntervalSeconds = 3f;
     private const float HumanProximitySq = 90f * 90f;
@@ -102,6 +108,9 @@ public class BotManagerComponent : MonoBehaviour
         GrenadeController = new GrenadeController(this);
         BudgetScheduler = new AIFrameBudgetScheduler();
         OfflineSquadWorldSync.ResetForNewRaid();
+        VisionRaycastJob.ResetDiagnosticsForNewRaid();
+        Pool = new BotGameObjectPool();
+        Dematerialization = new BotDematerializationController(this);
 
         SyncAiFrameBudgetFromPreset();
 
@@ -135,6 +144,7 @@ public class BotManagerComponent : MonoBehaviour
         SyncAiFrameBudgetFromPreset();
         MaybeLogBigBrainArbitrationHints(currentTime);
         OfflineSquadWorldSync.TrySync(this, currentTime);
+        OfflineSquadMaterialization.TryRematerializeDematSquadsNearHumans(this, currentTime);
         BudgetScheduler.ProcessFrame(BotSpawnController.SAINBots, currentTime, deltaTime);
     }
 
@@ -183,7 +193,7 @@ public class BotManagerComponent : MonoBehaviour
             }
 
             string layer = BrainManager.GetActiveLayerName(owner);
-            bool mismatch = LooksLikePriorityMismatch(bot, owner, layer);
+            bool mismatch = EvaluateBigBrainPriorityMismatch(bot, owner, layer);
             if (verbose && !mismatch)
             {
                 LogBigBrainDiagLine(bot, owner, layer, mismatch: false, infoOnly: true);
@@ -207,11 +217,19 @@ public class BotManagerComponent : MonoBehaviour
         string brain = owner.Brain?.BaseBrain?.ShortName() ?? "?";
         bool pressure = SAINExternal.IsBotUnderCombatPressure(owner);
         string reason = DescribeBigBrainDiagReason(bot, owner, layer, pressure);
+        bool exUsec = bot.Info?.Profile?.WildSpawnType == WildSpawnType.exUsec;
+        bool canShootNow = bot.GoalEnemy != null && bot.GoalEnemy.IsVisible && bot.GoalEnemy.CanShoot;
 
         string msg =
             $"[SAIN DIAG][BigBrain]{(mismatch ? "" : "[sample]")} {owner.name} brain={brain} layer=\"{layer}\" " +
             $"reason={reason} SAINLayersActive={bot.SAINLayersActive} SAINActiveLayer={bot.ActiveLayer} " +
-            $"pressure={pressure} GoalEnemy={goal} Combat={bot.Decision.CurrentCombatDecision} Squad={bot.Decision.CurrentSquadDecision}";
+            $"pressure={pressure} GoalEnemy={goal} Combat={bot.Decision.CurrentCombatDecision} Squad={bot.Decision.CurrentSquadDecision}" +
+            $" exUsec={exUsec} canShootNow={canShootNow}";
+
+        if (mismatch && exUsec && pressure)
+        {
+            msg += " exUsecMismatchUnderPressure=1";
+        }
 
         if (infoOnly)
         {
@@ -221,6 +239,19 @@ public class BotManagerComponent : MonoBehaviour
         {
             Logger.LogWarning(msg);
         }
+    }
+
+    /// <summary>Human-readable bucket for CSV / BepInEx diagnostics (not identical to <see cref="EvaluateBigBrainPriorityMismatch"/>).</summary>
+    public static string DescribeBigBrainMismatchReason(BotComponent bot, BotOwner owner, string layer)
+    {
+        bool pressure = SAINExternal.IsBotUnderCombatPressure(owner);
+        return DescribeBigBrainDiagReason(bot, owner, layer, pressure);
+    }
+
+    /// <summary>Same rule as in-raid <c>[SAIN DIAG][BigBrain]</c> mismatch detection — used by SAINPerfLog CSV.</summary>
+    public static bool EvaluateBigBrainPriorityMismatch(BotComponent bot, BotOwner owner, string activeLayer)
+    {
+        return LooksLikePriorityMismatch(bot, owner, activeLayer);
     }
 
     private static string DescribeBigBrainDiagReason(BotComponent bot, BotOwner owner, string layer, bool pressure)
@@ -365,6 +396,9 @@ public class BotManagerComponent : MonoBehaviour
                     bot?.Dispose();
                 }
             }
+
+            Dematerialization?.ResetForNewRaid();
+            Pool?.ClearPool();
 
             Bots?.Clear();
         }

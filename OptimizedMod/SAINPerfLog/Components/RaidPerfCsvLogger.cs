@@ -9,13 +9,27 @@ using DrakiaXYZ.BigBrain.Brains;
 using EFT;
 using SAIN;
 using SAIN.Components;
+using SAIN.Interop;
+using SAIN.Layers.Combat.Squad;
 using UnityEngine;
 
 namespace SAINPerfLog.Components;
 
 public class RaidPerfCsvLogger : MonoBehaviour
 {
-    private const int BigBrainSchemaVersion = 1;
+    /// <summary>
+    /// BigBrain snapshot CSV:
+    /// v7 adds VisionRaycastJob low-level channel counters (attempt/null/target/blocked for LOS/Vision/Shoot).
+    /// v8 adds EffectiveSuccess* totals (null OR target collider/root — same predicate as RaycastResult.CountsAsGameplaySuccess).
+    /// </summary>
+    private const int BigBrainSchemaVersion = 8;
+
+    private const int MaxMismatchExemplars = 6;
+    private const float NearDistanceMeters = 30f;
+    private const float MidDistanceMeters = 80f;
+
+    /// <summary>Wait this long for <see cref="EFT.GameWorld.LocationId"/> before falling back to <c>unknown</c> in filenames.</summary>
+    private const float WriterOpenTimeoutSec = 30f;
 
     /// <summary>Current per-raid perf CSV path, for F12 readouts; empty when not in a raid.</summary>
     public static string ActivePerfCsvPath { get; private set; } = string.Empty;
@@ -28,6 +42,7 @@ public class RaidPerfCsvLogger : MonoBehaviour
     private float _raidStartTime;
     private string _sessionToken;
     private string _locationId;
+    private bool _writersOpened;
 
     private StreamWriter _perfWriter;
     private StreamWriter _bigBrainWriter;
@@ -44,23 +59,40 @@ public class RaidPerfCsvLogger : MonoBehaviour
     private string _lastLayerHistogram;
     private int _lastMismatchCount = -1;
     private readonly Stopwatch _runStopwatch = new();
+    private long _lastDecisionTicksTotal;
+    private long _lastDecisionSkipsTotal;
+    private long _lastDecisionPreemptionsTotal;
+    private long _lastSquadOrdersReceivedTotal;
+    private double _lastDecisionExecutedCpuMsTotal;
+    private double _lastDecisionSavedCpuMsTotal;
 
     public void Initialize(EFT.GameWorld gameWorld)
     {
         _gameWorld = gameWorld;
         _raidStartUtc = DateTime.UtcNow;
         _raidStartTime = Time.time;
-        _locationId = ResolveLocationId(gameWorld);
         _sessionToken = Guid.NewGuid().ToString("N")[..8];
         _runStopwatch.Restart();
+        _lastDecisionTicksTotal = 0;
+        _lastDecisionSkipsTotal = 0;
+        _lastDecisionPreemptionsTotal = 0;
+        _lastSquadOrdersReceivedTotal = 0;
+        _lastDecisionExecutedCpuMsTotal = 0d;
+        _lastDecisionSavedCpuMsTotal = 0d;
 
-        OpenWriters();
+        // Do not open writers here: LocationId is often still empty during GameWorldUnityTickListener.Create.
         GameWorld.OnDispose += OnGameWorldDispose;
     }
 
     private void Update()
     {
         if (_gameWorld == null || PerfLogPlugin.Instance == null)
+        {
+            return;
+        }
+
+        TryEnsureWritersOpen();
+        if (!_writersOpened)
         {
             return;
         }
@@ -108,6 +140,30 @@ public class RaidPerfCsvLogger : MonoBehaviour
         CloseWriter(ref _bigBrainWriter);
         ActivePerfCsvPath = string.Empty;
         ActiveBigBrainCsvPath = string.Empty;
+        _writersOpened = false;
+    }
+
+    private void TryEnsureWritersOpen()
+    {
+        if (_writersOpened)
+        {
+            return;
+        }
+
+        string resolved = ResolveLocationIdBestEffort(_gameWorld);
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            if (Time.time - _raidStartTime < WriterOpenTimeoutSec)
+            {
+                return;
+            }
+
+            resolved = "unknown";
+        }
+
+        _locationId = resolved.Trim();
+        OpenWriters();
+        _writersOpened = true;
     }
 
     private void OpenWriters()
@@ -120,17 +176,25 @@ public class RaidPerfCsvLogger : MonoBehaviour
         ActivePerfCsvPath = _perfPath;
         ActiveBigBrainCsvPath = string.Empty;
 
-        _perfWriter = new StreamWriter(_perfPath, append: false) { AutoFlush = false };
+        UTF8Encoding utf8Bom = new(encoderShouldEmitUTF8Identifier: true);
+        _perfWriter = new StreamWriter(_perfPath, append: false, utf8Bom) { AutoFlush = false };
         _perfWriter.WriteLine(
-            "Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhaustedNow,BudgetExhausted%,BudgetHeadroomMs,ProcessedBots,SkippedBots,VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool"
+            "Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhaustedNow,BudgetExhausted%,BudgetHeadroomMs,ProcessedBots,SkippedBots,VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool,RaidElapsedSec,LocationId,SessionId"
         );
         _perfWriter.Flush();
 
         if (PerfLogPlugin.EnableBigBrainSnapshots.Value)
         {
-            _bigBrainWriter = new StreamWriter(_bigBrainPath, append: false) { AutoFlush = false };
+            _bigBrainWriter = new StreamWriter(_bigBrainPath, append: false, utf8Bom) { AutoFlush = false };
             ActiveBigBrainCsvPath = _bigBrainPath;
-            _bigBrainWriter.WriteLine("SchemaVersion,TimestampUtc,RaidElapsedSec,SainBotsTotal,SainBotsSampled,LayerHistogram,MismatchCombatSignals");
+            _bigBrainWriter.WriteLine(
+                "SchemaVersion,TimestampUtc,RaidElapsedSec,SainBotsTotal,SainBotsSampled,LayerHistogram,MismatchCombatSignals,LocationId,SessionId," +
+                "CustomBigBrainActiveCount,SignalGoalEnemy,SignalCombatNonNone,SignalSquadNonNone,SignalPressure,SignalAnyBots," +
+                "DistNearCount,DistMidCount,DistFarCount,EngagedNearCount,EngagedMidCount,EngagedFarCount,ExUsecEngagedNearCount,ExUsecEngagedMidCount,ExUsecEngagedFarCount,CanShootNowNearCount,CanShootNowMidCount,CanShootNowFarCount," +
+                "GoalHumanCount,GoalHumanEnemyInfoVisibleCount,GoalHumanSainPartsVisibleCount,GoalHumanSainPartsLineOfSightCount,GoalHumanSainPartsCanShootCount,GoalHumanFinalVisibleCount,GoalHumanFinalCanShootCount,GoalHumanVisibleDisagreeEnemyInfo0Parts1Count,GoalHumanVisibleDisagreeEnemyInfo1Parts0Count," +
+                "VisionRayAttemptLosTotal,VisionRayAttemptVisionTotal,VisionRayAttemptShootTotal,VisionRayNullLosTotal,VisionRayNullVisionTotal,VisionRayNullShootTotal,VisionRayTargetLosTotal,VisionRayTargetVisionTotal,VisionRayTargetShootTotal,VisionRayBlockedLosTotal,VisionRayBlockedVisionTotal,VisionRayBlockedShootTotal,VisionRayEffectiveLosTotal,VisionRayEffectiveVisionTotal,VisionRayEffectiveShootTotal," +
+                "SquadCommandedNowCount,SquadCommandUtilNowPct,DecisionTicksDelta,DecisionSkipsDelta,DecisionSkipRatePct,DecisionPreemptionsDelta,SquadOrdersReceivedDelta,DecisionCpuExecutedDeltaMs,DecisionCpuSavedDeltaMs,DecisionCpuDeltaMs,DecisionCpuSavedPerSkipMs," +
+                "MismatchLayerHistogram,MismatchReasonHistogram,PerceptionTierHistogram,MismatchExemplars");
             _bigBrainWriter.Flush();
             _nextBigBrainHeartbeatTime = Time.time + Mathf.Max(60f, PerfLogPlugin.SnapshotHeartbeatMinutes.Value * 60f);
         }
@@ -164,8 +228,11 @@ public class RaidPerfCsvLogger : MonoBehaviour
         int activePool = 0;
         TryReadPoolStats(ref pooled, ref activePool);
 
+        float raidElapsed = Mathf.Max(0f, Time.time - _raidStartTime);
+        string rowLocation = CsvEscape(ResolveLocationIdBestEffort(_gameWorld) ?? _locationId ?? "unknown");
+
         _perfWriter.WriteLine(
-            $"{DateTime.UtcNow:O},{fps:F1},{frameMs:F2},{budgetUsed:F3},{budgetLimit:F1},{budgetUtil:F1},{(scheduler.BudgetExhaustedLastFrame ? 1 : 0)},{exhaustedRate:F1},{budgetHeadroom:F3},{scheduler.BotsProcessedThisFrame},{scheduler.BotsSkippedThisFrame},{scheduler.VisibleBotsLastFrame},{scheduler.AudibleBotsLastFrame},{scheduler.OccludedBotsLastFrame},{scheduler.OfflineSquadCount},{scheduler.TotalOnlineBots},{pooled},{activePool}"
+            $"{DateTime.UtcNow:O},{fps:F1},{frameMs:F2},{budgetUsed:F3},{budgetLimit:F1},{budgetUtil:F1},{(scheduler.BudgetExhaustedLastFrame ? 1 : 0)},{exhaustedRate:F1},{budgetHeadroom:F3},{scheduler.BotsProcessedThisFrame},{scheduler.BotsSkippedThisFrame},{scheduler.VisibleBotsLastFrame},{scheduler.AudibleBotsLastFrame},{scheduler.OccludedBotsLastFrame},{scheduler.OfflineSquadCount},{scheduler.TotalOnlineBots},{pooled},{activePool},{raidElapsed:F1},{rowLocation},{CsvEscape(_sessionToken)}"
         );
         _perfWriter.Flush();
 
@@ -189,8 +256,48 @@ public class RaidPerfCsvLogger : MonoBehaviour
         }
 
         Dictionary<string, int> histogram = new(StringComparer.Ordinal);
+        Dictionary<string, int> mismatchLayerHist = new(StringComparer.Ordinal);
+        Dictionary<string, int> mismatchReasonHist = new(StringComparer.Ordinal);
+        Dictionary<string, int> tierHist = new(StringComparer.Ordinal);
+        List<string> mismatchExemplars = new();
+
         int mismatchCount = 0;
         int sampled = 0;
+        int customBigBrainActive = 0;
+        int signalGoalEnemy = 0;
+        int signalCombatNonNone = 0;
+        int signalSquadNonNone = 0;
+        int signalPressure = 0;
+        int signalAnyBots = 0;
+        int distNearCount = 0;
+        int distMidCount = 0;
+        int distFarCount = 0;
+        int engagedNearCount = 0;
+        int engagedMidCount = 0;
+        int engagedFarCount = 0;
+        int exUsecEngagedNearCount = 0;
+        int exUsecEngagedMidCount = 0;
+        int exUsecEngagedFarCount = 0;
+        int canShootNowNearCount = 0;
+        int canShootNowMidCount = 0;
+        int canShootNowFarCount = 0;
+        int goalHumanCount = 0;
+        int goalHumanEnemyInfoVisibleCount = 0;
+        int goalHumanSainPartsVisibleCount = 0;
+        int goalHumanSainPartsLineOfSightCount = 0;
+        int goalHumanSainPartsCanShootCount = 0;
+        int goalHumanFinalVisibleCount = 0;
+        int goalHumanFinalCanShootCount = 0;
+        int goalHumanVisibleDisagreeEnemyInfo0Parts1Count = 0;
+        int goalHumanVisibleDisagreeEnemyInfo1Parts0Count = 0;
+        int squadCommandedNowCount = 0;
+        long decisionTicksTotal = 0;
+        long decisionSkipsTotal = 0;
+        long decisionPreemptionsTotal = 0;
+        long squadOrdersReceivedTotal = 0;
+        double decisionExecutedCpuMsTotal = 0d;
+        double decisionSavedCpuMsTotal = 0d;
+        bool hasMainPlayer = TryGetMainPlayerPosition(out Vector3 mainPlayerPos);
 
         foreach (BotComponent bot in bots)
         {
@@ -215,9 +322,212 @@ public class RaidPerfCsvLogger : MonoBehaviour
             histogram[layer] = count + 1;
             sampled++;
 
-            if (LooksLikePriorityMismatch(bot, layer))
+            if (BrainManager.IsCustomLayerActive(owner))
+            {
+                customBigBrainActive++;
+            }
+
+            bool goal = bot.GoalEnemy != null;
+            bool combat = bot.Decision.CurrentCombatDecision != ECombatDecision.None;
+            bool squad = bot.Decision.CurrentSquadDecision != ESquadDecision.None;
+            bool canShootNow = bot.GoalEnemy != null && bot.GoalEnemy.IsVisible && bot.GoalEnemy.CanShoot;
+            if (bot.GoalEnemy != null && !bot.GoalEnemy.IsAI)
+            {
+                goalHumanCount++;
+
+                bool enemyInfoVisible = false;
+                bool partsVisible = false;
+                bool partsLineOfSight = false;
+                bool partsCanShoot = false;
+                bool finalVisible = false;
+                bool finalCanShoot = false;
+
+                try
+                {
+                    enemyInfoVisible = bot.GoalEnemy.EnemyInfo?.IsVisible == true;
+                }
+                catch
+                {
+                    enemyInfoVisible = false;
+                }
+
+                try
+                {
+                    var parts = bot.GoalEnemy.Vision?.EnemyParts;
+                    partsVisible = parts?.CanBeSeen == true;
+                    partsLineOfSight = parts?.LineOfSight == true;
+                    partsCanShoot = parts?.CanShoot == true;
+                }
+                catch
+                {
+                    partsVisible = false;
+                    partsLineOfSight = false;
+                    partsCanShoot = false;
+                }
+
+                finalVisible = bot.GoalEnemy.IsVisible;
+                finalCanShoot = bot.GoalEnemy.CanShoot;
+
+                if (enemyInfoVisible)
+                {
+                    goalHumanEnemyInfoVisibleCount++;
+                }
+                if (partsVisible)
+                {
+                    goalHumanSainPartsVisibleCount++;
+                }
+                if (partsLineOfSight)
+                {
+                    goalHumanSainPartsLineOfSightCount++;
+                }
+                if (partsCanShoot)
+                {
+                    goalHumanSainPartsCanShootCount++;
+                }
+                if (finalVisible)
+                {
+                    goalHumanFinalVisibleCount++;
+                }
+                if (finalCanShoot)
+                {
+                    goalHumanFinalCanShootCount++;
+                }
+                if (!enemyInfoVisible && partsVisible)
+                {
+                    goalHumanVisibleDisagreeEnemyInfo0Parts1Count++;
+                }
+                if (enemyInfoVisible && !partsVisible)
+                {
+                    goalHumanVisibleDisagreeEnemyInfo1Parts0Count++;
+                }
+            }
+            bool pressure = false;
+            try
+            {
+                pressure = SAINExternal.IsBotUnderCombatPressure(owner);
+            }
+            catch
+            {
+                pressure = false;
+            }
+
+            if (goal)
+            {
+                signalGoalEnemy++;
+            }
+
+            if (combat)
+            {
+                signalCombatNonNone++;
+            }
+
+            if (squad)
+            {
+                signalSquadNonNone++;
+            }
+
+            if (pressure)
+            {
+                signalPressure++;
+            }
+
+            if (goal || combat || squad || pressure)
+            {
+                signalAnyBots++;
+            }
+
+            bool squadCommandedNow = squad || SquadCombatCoordinator.HasActiveOrder(bot);
+            if (squadCommandedNow)
+            {
+                squadCommandedNowCount++;
+            }
+
+            var decisionManager = bot.Decision?.DecisionManager;
+            if (decisionManager != null)
+            {
+                decisionTicksTotal += decisionManager.DecisionTicksTotal;
+                decisionSkipsTotal += decisionManager.DecisionSkipsSquadOrderTotal;
+                decisionPreemptionsTotal += decisionManager.DecisionPreemptionsTotal;
+                squadOrdersReceivedTotal += decisionManager.SquadOrdersReceivedTotal;
+                decisionExecutedCpuMsTotal += decisionManager.DecisionCpuExecutedTotalMs;
+                decisionSavedCpuMsTotal += decisionManager.DecisionCpuEstimatedSavedTotalMs;
+            }
+
+            if (hasMainPlayer)
+            {
+                float distanceToPlayer = Vector3.Distance(bot.Position, mainPlayerPos);
+                bool engaged = goal || combat || pressure;
+                bool isExUsec = bot.Info?.Profile?.WildSpawnType == WildSpawnType.exUsec;
+
+                if (distanceToPlayer < NearDistanceMeters)
+                {
+                    distNearCount++;
+                    if (engaged)
+                    {
+                        engagedNearCount++;
+                        if (isExUsec)
+                        {
+                            exUsecEngagedNearCount++;
+                        }
+                    }
+                    if (canShootNow)
+                    {
+                        canShootNowNearCount++;
+                    }
+                }
+                else if (distanceToPlayer < MidDistanceMeters)
+                {
+                    distMidCount++;
+                    if (engaged)
+                    {
+                        engagedMidCount++;
+                        if (isExUsec)
+                        {
+                            exUsecEngagedMidCount++;
+                        }
+                    }
+                    if (canShootNow)
+                    {
+                        canShootNowMidCount++;
+                    }
+                }
+                else
+                {
+                    distFarCount++;
+                    if (engaged)
+                    {
+                        engagedFarCount++;
+                        if (isExUsec)
+                        {
+                            exUsecEngagedFarCount++;
+                        }
+                    }
+                    if (canShootNow)
+                    {
+                        canShootNowFarCount++;
+                    }
+                }
+            }
+
+            string tierKey = bot.CurrentPerceptionTier.ToString();
+            tierHist.TryGetValue(tierKey, out int tCount);
+            tierHist[tierKey] = tCount + 1;
+
+            bool mismatch = BotManagerComponent.EvaluateBigBrainPriorityMismatch(bot, owner, layer);
+            if (mismatch)
             {
                 mismatchCount++;
+                mismatchLayerHist.TryGetValue(layer, out int ml);
+                mismatchLayerHist[layer] = ml + 1;
+
+                string reason = BotManagerComponent.DescribeBigBrainMismatchReason(bot, owner, layer);
+                mismatchReasonHist.TryGetValue(reason, out int mr);
+                mismatchReasonHist[reason] = mr + 1;
+
+                if (mismatchExemplars.Count < MaxMismatchExemplars)
+                {
+                    mismatchExemplars.Add(BuildMismatchExemplar(bot, owner, layer, goal, combat, squad, pressure));
+                }
             }
         }
 
@@ -236,18 +546,127 @@ public class RaidPerfCsvLogger : MonoBehaviour
         }
 
         float raidElapsed = Mathf.Max(0f, Time.time - _raidStartTime);
+        string snapLocation = CsvEscape(ResolveLocationIdBestEffort(_gameWorld) ?? _locationId ?? "unknown");
+        string mismatchLayerString = BuildHistogram(mismatchLayerHist);
+        string mismatchReasonString = BuildHistogram(mismatchReasonHist);
+        string tierString = BuildHistogram(tierHist);
+        string exemplarsJoined = mismatchExemplars.Count == 0 ? "-" : string.Join("||", mismatchExemplars);
+        long decisionTicksDelta = Math.Max(0, decisionTicksTotal - _lastDecisionTicksTotal);
+        long decisionSkipsDelta = Math.Max(0, decisionSkipsTotal - _lastDecisionSkipsTotal);
+        long decisionPreemptionsDelta = Math.Max(0, decisionPreemptionsTotal - _lastDecisionPreemptionsTotal);
+        long squadOrdersReceivedDelta = Math.Max(0, squadOrdersReceivedTotal - _lastSquadOrdersReceivedTotal);
+        double decisionExecutedCpuDeltaMs = Math.Max(0d, decisionExecutedCpuMsTotal - _lastDecisionExecutedCpuMsTotal);
+        double decisionSavedCpuDeltaMs = Math.Max(0d, decisionSavedCpuMsTotal - _lastDecisionSavedCpuMsTotal);
+        double decisionCpuDeltaMs = decisionSavedCpuDeltaMs - decisionExecutedCpuDeltaMs;
+        double decisionSkipRatePct = decisionTicksDelta > 0 ? decisionSkipsDelta / (double)decisionTicksDelta * 100d : 0d;
+        double squadCommandUtilNowPct = sampled > 0 ? squadCommandedNowCount / (double)sampled * 100d : 0d;
+        double decisionCpuSavedPerSkipMs = decisionSkipsDelta > 0 ? decisionSavedCpuDeltaMs / decisionSkipsDelta : 0d;
+        VisionRaycastJob.VisionRaycastDiagnosticsSnapshot visionDiag = VisionRaycastJob.GetDiagnosticsSnapshot();
+
         _bigBrainWriter.WriteLine(
-            $"{BigBrainSchemaVersion},{DateTime.UtcNow:O},{raidElapsed:F1},{bots.Count},{sampled},\"{histogramString}\",{mismatchCount}"
+            $"{BigBrainSchemaVersion},{DateTime.UtcNow:O},{raidElapsed:F1},{bots.Count},{sampled},\"{histogramString}\",{mismatchCount},{snapLocation},{CsvEscape(_sessionToken)}," +
+            $"{customBigBrainActive},{signalGoalEnemy},{signalCombatNonNone},{signalSquadNonNone},{signalPressure},{signalAnyBots}," +
+            $"{distNearCount},{distMidCount},{distFarCount},{engagedNearCount},{engagedMidCount},{engagedFarCount},{exUsecEngagedNearCount},{exUsecEngagedMidCount},{exUsecEngagedFarCount},{canShootNowNearCount},{canShootNowMidCount},{canShootNowFarCount}," +
+            $"{goalHumanCount},{goalHumanEnemyInfoVisibleCount},{goalHumanSainPartsVisibleCount},{goalHumanSainPartsLineOfSightCount},{goalHumanSainPartsCanShootCount},{goalHumanFinalVisibleCount},{goalHumanFinalCanShootCount},{goalHumanVisibleDisagreeEnemyInfo0Parts1Count},{goalHumanVisibleDisagreeEnemyInfo1Parts0Count}," +
+                $"{visionDiag.AttemptsLineOfSight},{visionDiag.AttemptsVision},{visionDiag.AttemptsShoot},{visionDiag.HitsNullLineOfSight},{visionDiag.HitsNullVision},{visionDiag.HitsNullShoot},{visionDiag.HitsTargetLineOfSight},{visionDiag.HitsTargetVision},{visionDiag.HitsTargetShoot},{visionDiag.HitsBlockedLineOfSight},{visionDiag.HitsBlockedVision},{visionDiag.HitsBlockedShoot},{visionDiag.EffectiveSuccessLineOfSight},{visionDiag.EffectiveSuccessVision},{visionDiag.EffectiveSuccessShoot}," +
+            $"{squadCommandedNowCount},{squadCommandUtilNowPct:F1},{decisionTicksDelta},{decisionSkipsDelta},{decisionSkipRatePct:F1},{decisionPreemptionsDelta},{squadOrdersReceivedDelta},{decisionExecutedCpuDeltaMs:F3},{decisionSavedCpuDeltaMs:F3},{decisionCpuDeltaMs:F3},{decisionCpuSavedPerSkipMs:F4}," +
+            $"\"{mismatchLayerString}\",\"{mismatchReasonString}\",\"{tierString}\",{CsvEscape(exemplarsJoined)}"
         );
         _bigBrainWriter.Flush();
 
         _lastLayerHistogram = histogramString;
         _lastMismatchCount = mismatchCount;
+        _lastDecisionTicksTotal = decisionTicksTotal;
+        _lastDecisionSkipsTotal = decisionSkipsTotal;
+        _lastDecisionPreemptionsTotal = decisionPreemptionsTotal;
+        _lastSquadOrdersReceivedTotal = squadOrdersReceivedTotal;
+        _lastDecisionExecutedCpuMsTotal = decisionExecutedCpuMsTotal;
+        _lastDecisionSavedCpuMsTotal = decisionSavedCpuMsTotal;
 
         if (PerfLogPlugin.WriteLatestAlias.Value)
         {
             File.Copy(_bigBrainPath, Path.Combine(Path.GetDirectoryName(_bigBrainPath) ?? string.Empty, "sain_bigbrain_latest.csv"), true);
         }
+    }
+
+    private static string BuildMismatchExemplar(
+        BotComponent bot,
+        BotOwner owner,
+        string bigBrainLayer,
+        bool goal,
+        bool combat,
+        bool squad,
+        bool pressure)
+    {
+        string nick = owner.Profile?.Nickname ?? owner.Profile?.Id ?? owner.name ?? "bot";
+        string spawn = bot.Info?.Profile?.WildSpawnType.ToString() ?? "?";
+        string goalShort =
+            bot.GoalEnemy?.EnemyPlayer?.Profile?.Nickname
+            ?? bot.GoalEnemy?.EnemyProfileId
+            ?? "-";
+        bool customBb = BrainManager.IsCustomLayerActive(owner);
+        return string.Join(
+            "~",
+            TelemetryToken(nick, 20),
+            TelemetryToken(spawn, 24),
+            TelemetryToken(bigBrainLayer, 36),
+            goal ? "G1" : "G0",
+            combat ? "C1" : "C0",
+            squad ? "S1" : "S0",
+            pressure ? "P1" : "P0",
+            bot.SAINLayersActive ? "SL1" : "SL0",
+            TelemetryToken(bot.ActiveLayer.ToString(), 22),
+            customBb ? "BB1" : "BB0",
+            TelemetryToken(goalShort, 18));
+    }
+
+    private bool TryGetMainPlayerPosition(out Vector3 position)
+    {
+        position = default;
+        try
+        {
+            Player mainPlayer = _gameWorld?.MainPlayer;
+            if (mainPlayer == null)
+            {
+                return false;
+            }
+
+            position = mainPlayer.Transform != null ? mainPlayer.Transform.position : mainPlayer.Position;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string TelemetryToken(string value, int maxLen)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "-";
+        }
+
+        ReadOnlySpan<char> span = value.AsSpan().Trim();
+        StringBuilder sb = new(Math.Min(maxLen, span.Length));
+        for (int i = 0; i < span.Length && sb.Length < maxLen; i++)
+        {
+            char c = span[i];
+            if (c is '~' or '|' or '"' or '\r' or '\n' or ',')
+            {
+                sb.Append('_');
+            }
+            else if (char.IsControl(c))
+            {
+                sb.Append('_');
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.Length == 0 ? "-" : sb.ToString();
     }
 
     private static string BuildHistogram(Dictionary<string, int> histogram)
@@ -269,30 +688,6 @@ public class RaidPerfCsvLogger : MonoBehaviour
             sb.Append(value);
         }
         return sb.ToString();
-    }
-
-    private static bool LooksLikePriorityMismatch(BotComponent bot, string activeLayer)
-    {
-        if (string.IsNullOrEmpty(activeLayer))
-        {
-            return false;
-        }
-
-        bool sainCombatDriving =
-            activeLayer.IndexOf("combat", StringComparison.OrdinalIgnoreCase) >= 0
-            && (
-                activeLayer.IndexOf("solo", StringComparison.OrdinalIgnoreCase) >= 0
-                || activeLayer.IndexOf("squad", StringComparison.OrdinalIgnoreCase) >= 0
-                || activeLayer.IndexOf("sain", StringComparison.OrdinalIgnoreCase) >= 0
-            );
-        bool obviousQuestDriving = activeLayer.IndexOf("quest", StringComparison.OrdinalIgnoreCase) >= 0;
-
-        bool hasThreatSignals =
-            bot.GoalEnemy != null
-            || bot.Decision.CurrentCombatDecision != ECombatDecision.None
-            || bot.Decision.CurrentSquadDecision != ESquadDecision.None;
-
-        return hasThreatSignals && (obviousQuestDriving || !sainCombatDriving);
     }
 
     private static void TryReadPoolStats(ref int pooled, ref int activePool)
@@ -330,20 +725,23 @@ public class RaidPerfCsvLogger : MonoBehaviour
         }
     }
 
-    private static string ResolveLocationId(EFT.GameWorld gameWorld)
+    /// <summary>
+    /// Prefer direct <see cref="EFT.GameWorld.LocationId"/> (compile-time binding); reflection on <see cref="EFT.GameWorld"/> only
+    /// as fallback — <see cref="Type.GetProperty(string)"/> does not search base types, which caused false "unknown" on subclasses.
+    /// </summary>
+    private static string ResolveLocationIdBestEffort(EFT.GameWorld gameWorld)
     {
-        const string fallback = "unknown";
         if (gameWorld == null)
         {
-            return fallback;
+            return null;
         }
 
         try
         {
-            PropertyInfo locationProperty = gameWorld.GetType().GetProperty("LocationId", BindingFlags.Public | BindingFlags.Instance);
-            if (locationProperty?.GetValue(gameWorld) is string location && !string.IsNullOrWhiteSpace(location))
+            string id = gameWorld.LocationId;
+            if (!string.IsNullOrWhiteSpace(id))
             {
-                return location;
+                return id.Trim();
             }
         }
         catch
@@ -356,7 +754,7 @@ public class RaidPerfCsvLogger : MonoBehaviour
             string mainPlayerLocation = gameWorld.MainPlayer?.Location;
             if (!string.IsNullOrWhiteSpace(mainPlayerLocation))
             {
-                return mainPlayerLocation;
+                return mainPlayerLocation.Trim();
             }
         }
         catch
@@ -364,7 +762,37 @@ public class RaidPerfCsvLogger : MonoBehaviour
             // ignored
         }
 
-        return fallback;
+        try
+        {
+            PropertyInfo locationProperty = typeof(EFT.GameWorld).GetProperty(
+                "LocationId",
+                BindingFlags.Public | BindingFlags.Instance);
+            if (locationProperty?.GetValue(gameWorld) is string reflected && !string.IsNullOrWhiteSpace(reflected))
+            {
+                return reflected.Trim();
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return null;
+    }
+
+    private static string CsvEscape(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return "\"\"";
+        }
+
+        if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0)
+        {
+            return value;
+        }
+
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
 
     private static string Sanitize(string value)

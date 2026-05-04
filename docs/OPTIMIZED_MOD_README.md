@@ -6,20 +6,21 @@ Target: **Lighthouse with 29+ bots at stable 60 FPS.**
 ## Quick Start (Windows SPT)
 
 1. Copy `OptimizedMod/` to SPT `BepInEx/plugins/`
-2. Launch SPT, start raid
-3. Press **F12** → **SAINPerfLog (F12)** for live scheduler stats + diagnostics toggles
-4. Check `BepInEx/LogOutput/sain_perf/` after raid (timestamped per-raid CSVs; optional `*_latest.csv` aliases)
+2. **SAIN preset:** this fork’s **SAIN** builds a customized bootstrap preset **`Optimized (Harder PMCs)`** under `BepInEx/plugins/SAIN/Presets/` after you run the game with our `SAIN.dll` (see [SAIN_FORK_PRESET.md](SAIN_FORK_PRESET.md)). Replace the plugin’s `SAIN.dll` with the one from `dotnet build OptimizedMod/SAIN/SAIN.csproj -c Release` if the folder never appears.
+3. Launch SPT, start raid
+4. Press **F12** → **SAINPerfLog (F12)** for live scheduler stats + diagnostics toggles
+5. Check `BepInEx/LogOutput/sain_perf/` after raid (timestamped per-raid CSVs; optional `*_latest.csv` aliases)
 
 ## What's Inside
 
 ### Forked Mods (7)
 | Mod | Optimizations |
 |---|---|
-| **SAIN** | Budget scheduler, perception-tiered AI LOD, squad coordinator, State Tree layer eval, bot pool |
+| **SAIN** | Budget scheduler, perception-tiered AI LOD, squad coordinator, State Tree layer eval, bot pool; fork bootstrap preset + **what each preset parameter does to NPCs** — [SAIN_FORK_PRESET.md](SAIN_FORK_PRESET.md) |
 | **BigBrain** | State-tree migration (4x faster layer arbitration) |
 | **LootingBots** | Pool recycle state reset |
 | **Waypoints** | Path cache for recycled bots |
-| **AILimit** | Perception-system compat, LINQ alloc fix, pool coord |
+| **AILimit** | SAIN **dematerialize/rematerialize** + pool (soft dep); LINQ alloc fix — [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md) |
 | **ABPS** | Pool interceptor in spawn pipeline |
 | **MoreBotsAPI** | Pool integration, per-map config |
 
@@ -129,7 +130,10 @@ OptimizedMod/
 - `SAINPerfLog/PerfLogPlugin.cs` — Raid hook + **F12** readouts + diagnostic toggle
 - `BigBrain/Internal/CustomLayerWrapper.cs` — *(planned)* State Tree migration — **not shipped** in this fork
 - `LootingBots/.../LootingBrain.cs` — ResetForPoolRecycle
-- `AILimit/Component.cs` — LINQ allocation fix
+- `AILimit/Component.cs` — LINQ allocation fix; SAIN `Dematerialization` / `TrySain*` helpers
+- `AILimit/AILimit.csproj`, `AILimit/Plugin.cs` — `ProjectReference` to SAIN; soft BepInEx dependency
+- `SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` — `RecheckActivation` before skip; `TotalOnlineBots` + `forceTickBots`
+- `SAIN/SAIN/Components/BotDematerializationController.cs`, `BotGameObjectPool.cs`, `OfflineSquadMaterialization.cs` — pool + `demat_*` + proximity remat
 - `SAIN/SAIN/Preset/.../PerformanceSettings.cs` — PerformanceMode=true
 
 ## Known Limitations
@@ -137,12 +141,13 @@ OptimizedMod/
 | Issue | Status |
 |---|---|
 | CombatAudioSpoofer needs EFT AudioClip wiring | Coded but untested — BetterAudio path ready |
-| Offline-to-online squad transition | Not implemented — needs runtime testing |
+| Offline-to-online for **`auto_*`** statistical squads | Not implemented — **`demat_*`** proximity remat shipped; see [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md) |
 | Bot pool Harmony intercepts | Coded but untested — verify on live SPT |
 | Profiling baseline | Not captured — needs Windows SPT |
 
 ## Documentation
 
+- [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md) — AILimit ↔ SAIN pool / dematerialize / proximity remat (**full phased change record**)
 - `PROGRESS.md` — Current completion status and test instructions
 - `PERFORMANCE_ARCHITECTURE.md` — Full architecture guide (all 4 phases)
 - `PERFORMANCE_PLAN.md` — Detailed todo list with status

@@ -71,8 +71,8 @@ Applied wherever the spread operator `.. _commonVanillaLayersToRemove` is used f
 
 | Mod | Detection | Notes |
 |-----|-------------|--------|
-| QuestingBots | `ModDetection.QuestingBotsLoaded` | Quest / navigation layers may outrank SAIN if priorities overlap; use diagnostics. |
-| LootingBots | `ModDetection.LootingBotsLoaded` | Active layer name `"Looting"`; [`SAINLayer`](../OptimizedMod/SAIN/SAIN/Layers/SAINLayer.cs) unpause logic. Default loot priority **~62** vs SAIN combat **69–70** in fork docs. |
+| QuestingBots | `ModDetection.QuestingBotsLoaded` | Defaults in [`SPTQuestingBots/Shared/Config/config.json`](../SPTQuestingBots/Shared/Config/config.json): **`with_sain`** quest **68** / follow **69** / regroup **72** (below SAIN extract **~74** and combat **~77–78**). |
+| LootingBots | `ModDetection.LootingBotsLoaded` | Active layer name `"Looting"`; [`SAINLayer`](../OptimizedMod/SAIN/SAIN/Layers/SAINLayer.cs) unpause logic. Default loot priority **~62** vs QB quest **68** vs SAIN combat **~77–78**. |
 | BigBrain | BepInDependency | Version pin: `AssemblyInfoClass.BigBrainVersion`. |
 
 ## In-raid repro matrix (manual)

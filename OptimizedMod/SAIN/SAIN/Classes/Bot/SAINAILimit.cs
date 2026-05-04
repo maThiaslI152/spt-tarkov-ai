@@ -240,8 +240,13 @@ public class SAINAILimit : BotComponentClassBase
             return false;
         }
 
-        var raycastParams = new QueryParameters(LayerMaskClass.HighPolyWithTerrainNoGrassMask, false, QueryTriggerInteraction.Ignore);
-        _cachedIsVisible = !Physics.Raycast(cameraPos, direction.normalized, distance, LayerMaskClass.HighPolyWithTerrainNoGrassMask);
+        _cachedIsVisible = !Physics.Raycast(
+            cameraPos,
+            direction.normalized,
+            distance,
+            LayerMaskClass.HighPolyWithTerrainNoGrassMask,
+            QueryTriggerInteraction.Ignore
+        );
         return _cachedIsVisible;
     }
 

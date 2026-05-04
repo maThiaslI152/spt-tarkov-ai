@@ -100,6 +100,57 @@ public class BotGameObjectPool
     }
 
     /// <summary>
+    /// Remove a GameObject from any pool queue (same-raid rematerialize after <see cref="ReturnToPool"/>).
+    /// Does not destroy the object; caller re-activates it.
+    /// </summary>
+    public bool TryRemoveFromPool(GameObject gameObject)
+    {
+        if (gameObject == null)
+        {
+            return false;
+        }
+
+        int instanceId = gameObject.GetInstanceID();
+        foreach (var kv in _pool)
+        {
+            Queue<PooledBot> queue = kv.Value;
+            if (queue == null || queue.Count == 0)
+            {
+                continue;
+            }
+
+            int n = queue.Count;
+            var rebuilt = new Queue<PooledBot>(n);
+            bool removed = false;
+            while (n-- > 0)
+            {
+                PooledBot pooled = queue.Dequeue();
+                if (!removed
+                    && pooled.GameObject != null
+                    && pooled.GameObject.GetInstanceID() == instanceId)
+                {
+                    removed = true;
+                    continue;
+                }
+
+                rebuilt.Enqueue(pooled);
+            }
+
+            while (rebuilt.Count > 0)
+            {
+                queue.Enqueue(rebuilt.Dequeue());
+            }
+
+            if (removed)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Check if a GameObject instance is currently an active (non-pooled) bot.
     /// </summary>
     public bool IsActiveBot(int instanceId)

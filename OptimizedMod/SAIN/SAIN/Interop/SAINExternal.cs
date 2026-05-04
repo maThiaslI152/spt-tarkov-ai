@@ -14,6 +14,11 @@ namespace SAIN.Interop;
 /// </summary>
 public static class SAINExternal
 {
+    /// <summary>Minimum squared length for direction vectors used in quest-vs-threat dot checks (avoids NaN from Normalize).</summary>
+    private const float QuestDirectionMinSqr = 0.04f; // 20cm
+
+    private const float QuestAlignSeenSec = 10f;
+    private const float QuestAlignHeardSec = 5f;
     public static bool IgnoreHearing(BotOwner bot, bool value, bool ignoreUnderFire, float duration)
     {
         var component = GetBotComponent(bot);
@@ -195,6 +200,18 @@ public static class SAINExternal
 
             return false;
         }
+
+        dotProductThresh = Mathf.Clamp(dotProductThresh, -1f, 1f);
+        if (IsQuestHeadingTowardThreat(component, questPosition, dotProductThresh))
+        {
+            if (DebugExternal)
+            {
+                Logger.LogInfo($"{botOwner.name} cannot quest: objective direction aligns with an active threat (dot > {dotProductThresh}).");
+            }
+
+            return false;
+        }
+
         return true;
     }
 
@@ -207,19 +224,127 @@ public static class SAINExternal
         return component != null && IsBotInCombat(component, out _);
     }
 
+    /// <summary>
+    /// True if the horizontal direction from the bot to <paramref name="questPosition"/> aligns with
+    /// the direction to the current <see cref="BotComponent.GoalEnemy"/> last known position (dot product test).
+    /// </summary>
     public static bool IsQuestTowardTarget(BotComponent component, Vector3 questPosition, float dotProductThresh)
     {
+        if (component == null)
+        {
+            return false;
+        }
+
         Vector3? currentTarget = component.GoalEnemy?.LastKnownPosition;
         if (currentTarget == null)
         {
             return false;
         }
 
-        Vector3 botPosition = component.Position;
-        Vector3 targetDirection = currentTarget.Value - botPosition;
-        Vector3 questDirection = questPosition - botPosition;
+        dotProductThresh = Mathf.Clamp(dotProductThresh, -1f, 1f);
+        return IsQuestDirectionAlignedWithThreatOnPlane(
+            component.Position,
+            questPosition,
+            currentTarget.Value,
+            dotProductThresh
+        );
+    }
 
-        return Vector3.Dot(targetDirection.normalized, questDirection.normalized) > dotProductThresh;
+    /// <summary>
+    /// Quest objective lies roughly toward a threat (goal enemy last known, else closest recently-sensed human PMC/Player).
+    /// Used by <see cref="CanBotQuest"/> so QuestingBots does not march through a contact vector.
+    /// </summary>
+    private static bool IsQuestHeadingTowardThreat(BotComponent component, Vector3 questPosition, float dotProductThresh)
+    {
+        Enemy enemy = component.GoalEnemy;
+        if (enemy?.LastKnownPosition != null)
+        {
+            return IsQuestDirectionAlignedWithThreatOnPlane(
+                component.Position,
+                questPosition,
+                enemy.LastKnownPosition.Value,
+                dotProductThresh
+            );
+        }
+
+        enemy = FindClosestRecentlySensedHumanForQuestAlignment(component, QuestAlignSeenSec, QuestAlignHeardSec);
+        if (enemy?.LastKnownPosition == null)
+        {
+            return false;
+        }
+
+        return IsQuestDirectionAlignedWithThreatOnPlane(
+            component.Position,
+            questPosition,
+            enemy.LastKnownPosition.Value,
+            dotProductThresh
+        );
+    }
+
+    private static Enemy FindClosestRecentlySensedHumanForQuestAlignment(
+        BotComponent component,
+        float seenThreshold,
+        float heardThreshold
+    )
+    {
+        EnemyList knownEnemies = component?.EnemyController?.KnownEnemies;
+        if (knownEnemies == null || knownEnemies.Count == 0)
+        {
+            return null;
+        }
+
+        Enemy best = null;
+        float bestSqr = float.MaxValue;
+        Vector3 botPos = component.Position;
+        for (int i = 0; i < knownEnemies.Count; i++)
+        {
+            Enemy e = knownEnemies[i];
+            if (e == null || e.IsAI)
+            {
+                continue;
+            }
+
+            Vector3? lk = e.LastKnownPosition;
+            if (lk == null)
+            {
+                continue;
+            }
+
+            if (!e.IsVisible && e.TimeSinceSeen >= seenThreshold && e.TimeSinceHeard >= heardThreshold)
+            {
+                continue;
+            }
+
+            float d2 = (lk.Value - botPos).sqrMagnitude;
+            if (d2 < bestSqr)
+            {
+                bestSqr = d2;
+                best = e;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>X/Z only so vertical map offsets do not dominate the dot.</summary>
+    private static bool IsQuestDirectionAlignedWithThreatOnPlane(
+        Vector3 botPosition,
+        Vector3 questPosition,
+        Vector3 threatLastKnown,
+        float dotProductThresh
+    )
+    {
+        Vector3 toThreat = threatLastKnown - botPosition;
+        Vector3 toQuest = questPosition - botPosition;
+        toThreat.y = 0f;
+        toQuest.y = 0f;
+        if (toThreat.sqrMagnitude < QuestDirectionMinSqr || toQuest.sqrMagnitude < QuestDirectionMinSqr)
+        {
+            return false;
+        }
+
+        float dot = Vector3.Dot(toThreat.normalized, toQuest.normalized);
+        return dot > dotProductThresh;
     }
 
     private static bool IsBotSearching(BotComponent component)

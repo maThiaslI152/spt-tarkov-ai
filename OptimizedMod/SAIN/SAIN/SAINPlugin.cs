@@ -60,7 +60,7 @@ public class SAINPlugin : BaseUnityPlugin
         _patchManager = new(this, true);
 
         PresetHandler.Init();
-        TryCreateCustomPreset();
+        EnsureForkOptimizedPreset();
         BindConfigs();
         _patchManager.EnablePatches();
 
@@ -70,120 +70,58 @@ public class SAINPlugin : BaseUnityPlugin
         BigBrainHandler.Init();
     }
 
-    private static void TryCreateCustomPreset()
+    /// <summary>
+    /// Fork bootstrap preset: harder PMC baseline (see <see cref="SAINDifficulty.harderpmcs"/>), tuned for
+    /// player-centric LOD + frame budget (INDEX.md, docs/AI_BUDGET_LOD_PLAN.md). See docs/SAIN_FORK_PRESET.md.
+    /// </summary>
+    public const string ForkOptimizedPresetName = "Optimized (Harder PMCs)";
+
+    private static void EnsureForkOptimizedPreset()
     {
-        const string presetName = "My Tuned Preset";
-        if (PresetHandler.CustomPresetOptions.Exists(p => p.Name == presetName))
+        bool created = false;
+        if (!PresetHandler.CustomPresetOptions.Exists(p => p.Name == ForkOptimizedPresetName))
         {
-            return;
+            created = true;
+            var baseDef = SAINDifficultyClass.DefaultPresetDefinitions[SAINDifficulty.harderpmcs];
+            var newDef = baseDef.Clone();
+            newDef.Name = ForkOptimizedPresetName;
+            newDef.Description =
+                "Fork preset: Harder PMCs baseline, player-centric performance (LOD/budget), moderate hearing trim.";
+            newDef.Creator = "spt-tarkov-ai";
+
+            PresetHandler.SavePresetDefinition(newDef);
+            PresetHandler.InitPresetFromDefinition(newDef, true, exportEditorDefaults: false);
+            ApplyForkOptimizedTuning(PresetHandler.LoadedPreset);
+            SAINPresetClass.ExportAll(PresetHandler.LoadedPreset);
         }
 
-        var baseDef = SAINDifficultyClass.DefaultPresetDefinitions[SAINDifficulty.harderpmcs];
-        var newDef = baseDef.Clone();
-        newDef.Name = presetName;
-        newDef.Description = "Custom preset based on Harder PMCs with veryhard difficulty tuning. Hearing reduced to 50% to prevent wall pre-aiming.";
-        newDef.Creator = "user";
-
-        PresetHandler.SavePresetDefinition(newDef);
-        PresetHandler.InitPresetFromDefinition(newDef, true);
-
-        var global = PresetHandler.LoadedPreset.GlobalSettings;
-
-        // === Apply veryhard-level global settings ===
-        global.Shoot.BOT_RECOIL_COEF = 0.75f;
-        global.Difficulty.ScatteringCoef = 0.55f;
-        global.Aiming.AimCenterMassGlobal = false;
-        global.Difficulty.VisibleDistCoef = 1.25f;
-        global.Difficulty.GainSightCoef = 1.25f;
-        global.Difficulty.PRECISION_SPEED_COEF = 1.25f;
-        global.Difficulty.ACCURACY_SPEED_COEF = 0.6f;
-
-        // === Reduce hearing to prevent wall pre-aiming ===
-        global.Difficulty.HearingDistanceCoef = 0.5f;
-
-        // === Apply Harder PMCs bonuses (ApplyHarderPMCs equivalent) ===
-        var botSettings = PresetHandler.LoadedPreset.BotSettings;
-        foreach (var botsetting in botSettings.SAINSettings)
+        if (!PresetHandler.EditorDefaultsLoadedFromDisk)
         {
-            if (botsetting.Key == WildSpawnType.pmcUSEC || botsetting.Key == WildSpawnType.pmcBEAR)
+            if (PresetHandler.LoadPresetDefinition(ForkOptimizedPresetName, out var forkDef))
             {
-                foreach (var diff in botsetting.Value.Settings.Values)
+                if (!created)
                 {
-                    diff.Mind.WeaponProficiency = 0.75f;
-                    diff.Difficulty.ScatteringCoef = 0.6f;
-                    diff.Difficulty.PRECISION_SPEED_COEF = 1.33f;
-                    diff.Difficulty.ACCURACY_SPEED_COEF = 0.6f;
-                    diff.Difficulty.GainSightCoef = 1.25f;
-                    diff.Difficulty.VisibleDistCoef = 1.25f;
-                    diff.Difficulty.AggressionCoef = 1.2f;
-                    diff.Aiming.AimCenterMass = false;
+                    PresetHandler.InitPresetFromDefinition(forkDef);
                 }
-
-                var pmcSettings = botsetting.Value.Settings;
-                pmcSettings[BotDifficulty.easy].Aiming.MAX_AIM_TIME = 1.5f;
-                pmcSettings[BotDifficulty.normal].Aiming.MAX_AIM_TIME = 1.35f;
-                pmcSettings[BotDifficulty.hard].Aiming.MAX_AIM_TIME = 1.15f;
-                pmcSettings[BotDifficulty.impossible].Aiming.MAX_AIM_TIME = 1.0f;
+                else
+                {
+                    PresetHandler.EditorDefaults.SelectedDefaultPreset = SAINDifficulty.none;
+                    PresetHandler.ExportEditorDefaults();
+                }
             }
         }
-
-        // === Apply veryhard-level per-bot overrides ===
-        foreach (var botsetting in botSettings.SAINSettings)
+        else if (created)
         {
-            botsetting.Value.DifficultyModifier = Mathf.Clamp(botsetting.Value.DifficultyModifier * 1.33f, 0.01f, 2f);
-
-            foreach (var setting in botsetting.Value.Settings)
-            {
-                setting.Value.Core.VisibleAngle = 170f;
-                setting.Value.Shoot.FireratMulti = 1.5f;
-                setting.Value.Shoot.BurstMulti = 2f;
-                setting.Value.Aiming.AimCenterMass = false;
-            }
+            PresetHandler.InitPresetFromDefinition(null);
         }
+    }
 
-        // === Apply veryhard-level strafe speeds ===
-        foreach (var botsetting in botSettings.SAINSettings)
-        {
-            var settings = botsetting.Value.Settings;
-            if (botsetting.Key.IsBossOrFollower()
-                || botsetting.Key.IsPmcBot()
-                || botsetting.Key == WildSpawnType.exUsec
-                || botsetting.Key == WildSpawnType.pmcBot
-                || botsetting.Key == WildSpawnType.arenaFighter
-                || botsetting.Key == WildSpawnType.arenaFighterEvent)
-            {
-                settings[BotDifficulty.easy].Move.STRAFE_SPEED = 0.75f;
-                settings[BotDifficulty.normal].Move.STRAFE_SPEED = 0.85f;
-                settings[BotDifficulty.hard].Move.STRAFE_SPEED = 0.9f;
-                settings[BotDifficulty.impossible].Move.STRAFE_SPEED = 1.0f;
-            }
-            else if (botsetting.Key == WildSpawnType.assault || botsetting.Key == WildSpawnType.assaultGroup)
-            {
-                settings[BotDifficulty.easy].Move.STRAFE_SPEED = 0.65f;
-                settings[BotDifficulty.normal].Move.STRAFE_SPEED = 0.7f;
-                settings[BotDifficulty.hard].Move.STRAFE_SPEED = 0.75f;
-                settings[BotDifficulty.impossible].Move.STRAFE_SPEED = 0.9f;
-            }
-        }
-
-        // === Extended engagement distances ===
-        var engagement = global.Shoot.EngagementDistance;
-        engagement[EWeaponClass.Default] = 200f;
-        engagement[EWeaponClass.assaultCarbine] = 200f;
-        engagement[EWeaponClass.assaultRifle] = 250f;
-        engagement[EWeaponClass.machinegun] = 200f;
-        engagement[EWeaponClass.smg] = 150f;
-        engagement[EWeaponClass.pistol] = 125f;
-        engagement[EWeaponClass.marksmanRifle] = 250f;
-        engagement[EWeaponClass.sniperRifle] = 250f;
-        engagement[EWeaponClass.shotgun] = 125f;
-        engagement[EWeaponClass.grenadeLauncher] = 175f;
-        engagement[EWeaponClass.specialWeapon] = 175f;
-
-        // === Raider-specific distance multiplier ===
-        global.Shoot.RaiderEngagementDistanceMultiplier = 2f;
-
-        SAINPresetClass.ExportAll(PresetHandler.LoadedPreset);
+    private static void ApplyForkOptimizedTuning(SAINPresetClass preset)
+    {
+        var global = preset.GlobalSettings;
+        global.General.Performance.PerformanceMode = true;
+        global.General.Performance.MaxAiBudgetMilliseconds = Mathf.Clamp(3f, 1f, 10f);
+        global.Difficulty.HearingDistanceCoef = 0.85f;
     }
 
     private void BindConfigs()

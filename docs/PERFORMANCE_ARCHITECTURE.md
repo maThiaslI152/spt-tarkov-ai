@@ -237,7 +237,7 @@ Implemented in `BotComponent.ManualUpdate()` lines 189-220.
 - `SAIN/SAIN/Components/OfflineCombatResolver.cs` — statistical combat model
 - `SAIN/SAIN/Components/CombatAudioSpoofer.cs` — spoofed gunfire audio (procedural clip + `PlayClipAtPoint`; BetterAudio TBD)
 - `SAIN/SAIN/Components/OfflineSquadWorldSync.cs` — auto `RegisterOfflineSquad` from occluded AI-vs-AI pairs (`auto_*` ids)
-- `SAIN/SAIN/Components/OfflineSquadMaterialization.cs` — reserved hook for offline→online (stub)
+- `SAIN/SAIN/Components/OfflineSquadMaterialization.cs` — **`demat_*`** AILimit proximity remat **shipped**; **`auto_*`** spawn-from-stats still a roadmap item (see [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md), [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md))
 
 **Implementation status vs full SMART:** see **[SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md)**.
 

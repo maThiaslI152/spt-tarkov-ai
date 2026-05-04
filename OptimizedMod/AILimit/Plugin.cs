@@ -11,6 +11,7 @@ namespace AIlimit
 {
     [BepInPlugin("com.dvize.ailimit", "dvize.AILimit", "1.9.0")]
     [BepInDependency("com.fika.core", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("me.sol.sain", BepInDependency.DependencyFlags.SoftDependency)]
     public class AILimitPlugin : BaseUnityPlugin
     {
         public static ConfigEntry<bool> PluginEnabled;

@@ -1,5 +1,7 @@
 # SPT Questing Bots
 
+**Role in *this* workspace:** `SPTQuestingBots/` is here **only for study** and to **copy behavior** (BigBrain layers, quest flow, SAIN interop ideas) into the forks under `OptimizedMod/`. It is **not** part of the optimized stack you Release-build from `OptimizedMod/`; treat it as **reference material**, not a mandatory deploy sibling.
+
 ## Overview
 
 **Author:** DanW  
@@ -8,6 +10,14 @@
 **GUID:** `com.danw.questingbots`  
 **License:** CC BY-NC-SA 4.0  
 **Repository:** https://github.com/maThiaslI152/SPTQuestingBots.git
+
+**Local clone (this monorepo):** [`SPTQuestingBots/`](../SPTQuestingBots/) — optional sibling checkout for **reading** QB client/server code next to `OptimizedMod/`.
+
+### Status in this workspace (read this)
+
+- **Upstream targets an older SPT line** (see **SPT Version** in `Shared/ModInfo.cs` / table above). The original author / listed repo may **not** track your current SPT + EFT client build.
+- **Intent here is educational:** study architecture (BigBrain layers, quest selection, SAIN interop patterns, config shape). Treat the clone as **reference material**, not a promise that the full solution builds or runs on your install without porting work.
+- **Changes we made** under `SPTQuestingBots/` (priorities, etc.) illustrate how to **align** QB with the **spt-tarkov-ai SAIN fork** if you ever fork or port the mod; they do not certify compatibility with latest SPT.
 
 SPT Questing Bots transforms the Single Player Tarkov experience by giving AI bots dynamic quest objectives, replacing their default patrol behavior with goal-oriented movement across the entire map. Instead of staying in spawn zones, bots now actively traverse the map to complete EFT quests, hunt bosses, chase airdrops, camp, snipe, and extract — mimicking the behavior of real human players.
 
@@ -194,9 +204,52 @@ Configuration is extensive, with 300+ settings organized into:
 - Scav spawn rate control
 
 ### Combat Reactivity Knobs (QB)
-- **`brain_layer_priorities`**: keep QB quest/navigation priorities below SAIN combat/extract layer priorities.
+- **`brain_layer_priorities`**: shipped defaults in [`SPTQuestingBots/Shared/Config/config.json`](../SPTQuestingBots/Shared/Config/config.json) align with **spt-tarkov-ai** SAIN fork: **`with_sain`** questing **68** / following **69** / regrouping **72** (above default LootingBots **~62**, below SAIN Extract **~74** and combat **~77–78**). **`without_sain`** uses **65 / 66 / 72**. Override only if you know your SAIN preset `LayerSettings` and LootingBots priority.
 - **Hearing sensor settings** (`HearingSensorConfig`): tune detection/suspend thresholds so nearby shots and steps suspend questing promptly.
 - **Post-combat search cooldown** (`SearchTimeAfterCombatConfig`): tune resume/search delays so bots finish contact/search state before questing resumes.
+
+---
+
+## Upstream QB ↔ spt-tarkov-ai SAIN fork (what was “taken” and validity)
+
+QuestingBots is **not** copied into `OptimizedMod/`. Integration is **runtime-only**: QB ships its own reflection client; the fork extends **SAIN** so that API matches what QB calls.
+
+### What QuestingBots takes from SAIN (upstream `SPTQuestingBots/Client`)
+
+| Mechanism | QB file | Calls into SAIN |
+|-------------|---------|-------------------|
+| Reflection bootstrap | `Client/BotLogic/ExternalMods/Interop/SAINInterop.cs` | `Type.GetType("SAIN.Interop.SAINExternal, SAIN")` then `AccessTools.Method` for each API |
+| Quest / movement gating | Same — `CanBotQuest`, `IsPathTowardEnemy`, `TimeSinceSenseEnemy` | `SAINExternal` static methods |
+| Extract | `SAINExtractFunction.cs` | `ExtractBot`, `TrySetExfilForBot` |
+| Hearing mute | `SAINHearingFunction.cs` | `IgnoreHearing` |
+| Personality | `SAINInterop.GetPersonality` | `GetPersonality` |
+| Layer priority bootstrap | `TarkovInitPatch.cs` + `SAINModInfo.cs` | Reads registered BigBrain SAIN layer priorities; picks `BrainLayerPriorities.WithSAIN` vs `WithoutSAIN` |
+
+QB’s `SAINInterop` is the **source of truth** for the public contract. Our fork keeps the real implementations in `OptimizedMod/SAIN/SAIN/Interop/SAINExternal.cs`.
+
+### What the SAIN fork adds for QuestingBots (this repo)
+
+| Piece | Location | Role |
+|-------|-----------|------|
+| `ModDetection.QuestingBotsLoaded` | `SAIN/Plugin/ModDetection.cs` | Enables QB-specific branches when the QB plugin is present |
+| QB threat merge in combat pressure | `SAINExternal.IsBotInCombat` → `HasQuestingBotsCombatSignals` | Extra “in combat” signal when QB is loaded (line-of-sight / `AtPeace` / recent human) so `CanBotQuest` can return false without a stable `GoalEnemy` |
+| Extract / peaceful time-extract | `ExtractLayer`, `PeacefulLayer` | Skips time-based extract branch when QB loaded so QB drives raid flow |
+| BigBrain priorities | `LayerSettings` + `BigBrainHandler` | Combat/extract numeric priorities tuned to beat QB quest layers when SAIN combat `IsActive()` |
+
+### Copy drift: `OptimizedMod/SAIN/…/SAINInterop.cs`
+
+That file is a **template** (“can be copied to other mods”). It previously used `SAIN.Plugin.External, SAIN`, which **does not exist** in this fork — QuestingBots correctly uses `SAIN.Interop.SAINExternal, SAIN`. The template was **updated** to match QB so copy-paste stays valid.
+
+### GUID detection (was broken; fixed)
+
+QuestingBots registers with GUID **`com.danw.questingbots`** (`Shared/ModInfo.cs`). The SAIN fork used **`com.DanW.QuestingBots`**, so `Chainloader.PluginInfos.ContainsKey` could **never** match and `QuestingBotsLoaded` stayed **false**. That silently disabled all QB-specific SAIN branches (`HasQuestingBotsCombatSignals` gating, extract time skip). **`AssemblyInfoClass.QuestingBotsGUID`** was corrected to **`com.danw.questingbots`**.
+
+### Contract health
+
+| API | Status |
+|-----|--------|
+| `ExtractBot`, `TrySetExfilForBot`, `IsPathTowardEnemy`, `TimeSinceSenseEnemy`, `CanBotQuest`, `GetExtractedBots`, `GetExtractionInfos`, `IgnoreHearing`, `GetPersonality` | Still defined on `SAINExternal`; QB resolves same method names |
+| `CanBotQuest(botOwner, questPosition, dotThreshold)` | **Callable and consistent**; `questPosition` and dot gate questing when the **horizontal** vector to the objective aligns with **GoalEnemy** last known, or with the **closest recently-sensed human** (same seen/heard windows as combat alignment). Threshold clamped to \[-1, 1\]. |
 
 ---
 

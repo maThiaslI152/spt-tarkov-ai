@@ -22,6 +22,9 @@ internal static class OfflineSquadWorldSync
     private const float MinHumanDistanceSq = 70f * 70f;
     private const string AutoSquadPrefix = "auto_";
 
+    /// <summary>Prefix for <c>BotDematerializationController</c> single-bot offline rows (Phase 1 seam).</summary>
+    internal const string DematerializeSquadIdPrefix = "demat_";
+
     private static float _nextSyncTime;
     private static readonly List<string> _registeredAutoSquadIds = new();
 
@@ -140,8 +143,8 @@ internal static class OfflineSquadWorldSync
             return;
         }
 
-        OfflineSquad squadA = BuildSquadFromBotsGroup(best.a, sainBots);
-        OfflineSquad squadB = BuildSquadFromBotsGroup(best.b, sainBots);
+        OfflineSquad squadA = BuildSquadFromBotsGroupForAutoSync(best.a, sainBots);
+        OfflineSquad squadB = BuildSquadFromBotsGroupForAutoSync(best.b, sainBots);
 
         if (squadA?.Members.Count > 0 && squadB?.Members.Count > 0
             && HostileGroups(squadA, squadB, best.a, best.b))
@@ -206,7 +209,27 @@ internal static class OfflineSquadWorldSync
         return true;
     }
 
-    private static OfflineSquad BuildSquadFromBotsGroup(BotComponent anchor, IEnumerable<BotComponent> allBots)
+    private static OfflineSquad BuildSquadFromBotsGroupForAutoSync(BotComponent anchor, IEnumerable<BotComponent> allBots)
+    {
+        return BuildSquadFromBotsGroup(
+            anchor,
+            allBots,
+            requireOccludedPerceptionTier: true,
+            requireBotActive: true,
+            squadIdPrefix: AutoSquadPrefix);
+    }
+
+    /// <summary>
+    /// Builds an <see cref="OfflineSquad"/> from all alive members of <paramref name="anchor"/>'s
+    /// <c>BotsGroup</c>. Used by auto-sync (occluded + active) and by dematerialization (relaxed filters).
+    /// </summary>
+    internal static OfflineSquad BuildSquadFromBotsGroup(
+        BotComponent anchor,
+        IEnumerable<BotComponent> allBots,
+        bool requireOccludedPerceptionTier,
+        bool requireBotActive,
+        string squadIdPrefix
+    )
     {
         BotsGroup group = anchor.BotOwner?.BotsGroup;
         if (group == null)
@@ -221,7 +244,12 @@ internal static class OfflineSquadWorldSync
 
         foreach (BotComponent bot in allBots)
         {
-            if (bot == null || bot.IsDead || !bot.BotActive)
+            if (bot == null || bot.IsDead)
+            {
+                continue;
+            }
+
+            if (requireBotActive && !bot.BotActive)
             {
                 continue;
             }
@@ -231,7 +259,7 @@ internal static class OfflineSquadWorldSync
                 continue;
             }
 
-            if (bot.CurrentPerceptionTier != PerceptionTier.Occluded)
+            if (requireOccludedPerceptionTier && bot.CurrentPerceptionTier != PerceptionTier.Occluded)
             {
                 continue;
             }
@@ -253,7 +281,7 @@ internal static class OfflineSquadWorldSync
 
         return new OfflineSquad
         {
-            SquadId = AutoSquadPrefix + minProfileId,
+            SquadId = squadIdPrefix + minProfileId,
             Faction = anchor.Info?.Profile?.WildSpawnType.ToString() ?? "unknown",
             CenterPosition = sum / n,
             Members = members,
@@ -261,7 +289,27 @@ internal static class OfflineSquadWorldSync
         };
     }
 
-    private static BotCombatStats CreateCombatStats(BotComponent bot)
+    /// <summary>
+    /// Single-bot offline row for dematerialize (Phase 1). Avoids registering squads that still have live members in full sim.
+    /// </summary>
+    internal static OfflineSquad BuildDematerializeSquadForBot(BotComponent anchor)
+    {
+        if (anchor == null || anchor.IsDead || string.IsNullOrEmpty(anchor.ProfileId))
+        {
+            return null;
+        }
+
+        return new OfflineSquad
+        {
+            SquadId = DematerializeSquadIdPrefix + anchor.ProfileId,
+            Faction = anchor.Info?.Profile?.WildSpawnType.ToString() ?? "unknown",
+            CenterPosition = anchor.Position,
+            Members = new List<BotCombatStats> { CreateCombatStats(anchor) },
+            IsHostileToOtherFaction = true,
+        };
+    }
+
+    internal static BotCombatStats CreateCombatStats(BotComponent bot)
     {
         var stats = new BotCombatStats
         {

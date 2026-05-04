@@ -3,7 +3,7 @@
 > **Code location:** All source code lives in `OptimizedMod/`. File paths in this document use original mod names for clarity — actual files are under `OptimizedMod/BigBrain/`, `OptimizedMod/SAIN/`, etc. spt-unda is not included in the fork.  
 > This document maps how the AI mods in this workspace interoperate. It is designed to be extensible — as new mods are added, their integration points can be appended.
 
-**AI agents:** start at [INDEX.md](../INDEX.md); for read order and build commands see [AGENTS.md](AGENTS.md).
+**AI agents:** start at [INDEX.md](../INDEX.md); for read order and build commands see [AGENTS.md](AGENTS.md). **AILimit + SAIN dematerialization / pool (phased implementation record):** [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md).
 
 ---
 
@@ -68,7 +68,7 @@ The relationship is a **stack with priority-based arbitration**:
 2. **BigBrain** patches into the brain system and provides the `BrainManager` API + `CustomLayer`/`CustomLogic` base classes
 3. **Waypoints** provides expanded navmesh data for bot pathfinding
 4. **SAIN** consumes BigBrain's API to register combat layers at priorities 60–99 (see BigBrainHandler registrations).
-5. **LootingBots** registers its loot/peace layer at a **configurable** numeric priority (`BigBrainLootLayerPriority`, **default 62** in this fork) so loot/peace sits above BotMind-style layers (~50) while **SAIN combat and extract layers stay higher** (~65 extract, ~69–70 combat — tune via configs).
+5. **LootingBots** registers its loot/peace layer at a **configurable** numeric priority (`BigBrainLootLayerPriority`, **default 62** in this fork) so loot/peace sits above BotMind-style layers (~~50) while **SAIN combat and extract layers stay higher** (~~65 extract, ~69–70 combat — tune via configs).
 6. **Infrastructure mods** operate below or alongside behavior mods:
   - **AILimit**: Unity-level bot deactivation via `GameObject.SetActive(false)` (below BigBrain, below NavMesh)
   - **ABPS**: Client-side spawn caps, despawn mechanics, boss chance tuning (spawn system level)
@@ -216,9 +216,9 @@ SAIN registers its layers via `BrainManager.AddCustomLayer()` for each bot brain
 // Example for PMCs (from BigBrainHandler.cs):
 BrainManager.AddCustomLayer(typeof(DebugLayer),          pmcBrain, 99);
 BrainManager.AddCustomLayer(typeof(SAINAvoidThreatLayer), pmcBrain, 80);
-BrainManager.AddCustomLayer(typeof(ExtractLayer),         pmcBrain, settings.SAINExtractLayerPriority);
 BrainManager.AddCustomLayer(typeof(CombatSquadLayer),     pmcBrain, settings.SAINCombatSquadLayerPriority);
 BrainManager.AddCustomLayer(typeof(CombatSoloLayer),      pmcBrain, settings.SAINCombatSoloLayerPriority);
+BrainManager.AddCustomLayer(typeof(ExtractLayer),         pmcBrain, settings.SAINExtractLayerPriority);
 ```
 
 The `brainNames` parameter determines which vanilla EFT brains get the SAIN layers injected.
@@ -241,7 +241,7 @@ string[] _commonVanillaLayersToRemove = [
 Each bot type has additional type-specific vanilla layers removed (e.g., boss fight layers,
 knight fight layers, etc.).
 
-**Restart requirement:** `BigBrainHandler.Init()` runs only from `SAINPlugin.Awake()` (game start). Changing **`LayerSettings`** priorities or **`VanillaBotSettings`** toggles in the BepInEx UI does **not** re-register or re-strip layers until you **fully restart the game**. See [`docs/BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md) for the full brain / layer matrix.
+**Restart requirement:** `BigBrainHandler.Init()` runs only from `SAINPlugin.Awake()` (game start). Changing `**LayerSettings`** priorities or `**VanillaBotSettings**` toggles in the BepInEx UI does **not** re-register or re-strip layers until you **fully restart the game**. See `[docs/BIGBRAIN_LAYER_MATRIX.md](BIGBRAIN_LAYER_MATRIX.md)` for the full brain / layer matrix.
 
 ### Runtime Lifecycle
 
@@ -272,11 +272,11 @@ knight fight layers, etc.).
 
 ### QuestingBots (third-party) — SAIN combat must beat quest layer
 
-When **SPT QuestingBots** is installed ([docs/SPTQuestingBots.md](SPTQuestingBots.md)), it registers additional BigBrain layers and reads **`brain_layer_priorities`** from QB config. Arbitration is **numeric priority among layers whose `IsActive()` is true** — there is no central if/else tree across mods.
+When **SPT QuestingBots** is installed ([docs/SPTQuestingBots.md](SPTQuestingBots.md)), it registers additional BigBrain layers and reads `**brain_layer_priorities`** from QB config. Arbitration is **numeric priority among layers whose `IsActive()` is true** — there is no central if/else tree across mods.
 
-**Rule:** For brains used by questing bots, **SAIN combat layer priorities** from preset [`LayerSettings`](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs) (**`SAINCombatSquadLayerPriority`** / **`SAINCombatSoloLayerPriority`**, typically **70** / **69**) must be **strictly greater than** QuestingBots’ quest / navigation layer priorities. Otherwise bots can remain on **quest movement** while SAIN has already removed vanilla assault layers, yielding “walk to objective, don’t shoot.”
+**Rule:** For brains used by questing bots, **SAIN combat layer priorities** from preset `[LayerSettings](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs)` (`**SAINCombatSquadLayerPriority`** / `**SAINCombatSoloLayerPriority**`, fork defaults **78** / **77**, still **below** `SAINAvoidThreatLayer` **80**) must be **strictly greater than** QuestingBots’ quest / navigation layer priorities. Otherwise bots can remain on **quest movement** while SAIN has already removed vanilla assault layers, yielding “walk to objective, don’t shoot.”
 
-**Also use:** QB **hearing sensor** and **post-combat search/suspend cooldown** settings (`HearingSensorConfig`, `SearchTimeAfterCombatConfig`) so quest layers drop **`IsActive`** quickly under contact and do not resume too early. **SAINInterop `CanBotQuest`** ([`SAINExternal`](../OptimizedMod/SAIN/SAIN/Interop/SAINExternal.cs)) now applies conservative QuestingBots-only combat gating from SAIN enemy-controller signals while preserving non-QB behavior. Performance CSV alone may show **low AI ms utilization** while this mis-ordering persists ([AI_BUDGET_LOD_PLAN.md](AI_BUDGET_LOD_PLAN.md)).
+**Also use:** QB **hearing sensor** and **post-combat search/suspend cooldown** settings (`HearingSensorConfig`, `SearchTimeAfterCombatConfig`) so quest layers drop `**IsActive`** quickly under contact and do not resume too early. **SAINInterop `CanBotQuest`** (`[SAINExternal](../OptimizedMod/SAIN/SAIN/Interop/SAINExternal.cs)`) now applies conservative QuestingBots-only combat gating from SAIN enemy-controller signals while preserving non-QB behavior. Performance CSV alone may show **low AI ms utilization** while this mis-ordering persists ([AI_BUDGET_LOD_PLAN.md](AI_BUDGET_LOD_PLAN.md)).
 
 #### Known issue / validation pending
 
@@ -294,6 +294,7 @@ Rogues can now run a Rogue-only squad-defense policy in SAIN coordinator logic:
 - **Defense posture:** out of contact, squad favors patrol/hold-style decisions instead of drifting to loot behavior.
 - **Loot suppression:** when LootingBots is present, SAIN coordinator calls LB interop `TryPreventBotFromLooting` for Rogue members in scope.
 - **Scope guard:** default scope is Lighthouse-only Rogue context; policy can be disabled or broadened through preset settings.
+- **Combat squad layer bootstrap:** `CombatSquadLayer` may call `CoordinateSquad` while `CurrentSquadDecision` is still `None` when `ShouldBootstrapRogueDefenseCombatLayer` is true, so the coordinator can issue the first squad orders and run loot suppression without a chicken-and-egg dependency on `SquadDecisionClass` having already set a squad decision. See [ROGUE_BASE_DEFENSE_PLAN.md](ROGUE_BASE_DEFENSE_PLAN.md) (“Shipped: Combat squad layer bootstrap”).
 
 Configuration lives in SAIN preset under `General -> Rogue Base Defense`:
 
@@ -450,17 +451,17 @@ When multiple BigBrain layers want to be active, they're checked in **priority o
 (higher number = checked first):
 
 
-| Priority | Layer                | Mod             | When Active                                |
-| -------- | -------------------- | --------------- | ------------------------------------------ |
-| 99       | DebugLayer           | SAIN            | Debug mode                                 |
-| 80       | SAINAvoidThreatLayer | SAIN            | Grenade/artillery nearby                   |
-| ~65      | ExtractLayer         | SAIN            | Bot wants to extract                       |
-| ~60-70   | CombatSquadLayer     | SAIN            | Squad combat                               |
-| ~60-70   | CombatSoloLayer      | SAIN            | Solo combat                                |
+| Priority | Layer                | Mod             | When Active                                                                          |
+| -------- | -------------------- | --------------- | ------------------------------------------------------------------------------------ |
+| 99       | DebugLayer           | SAIN            | Debug mode                                                                           |
+| 80       | SAINAvoidThreatLayer | SAIN            | Grenade/artillery nearby                                                             |
+| ~65      | ExtractLayer         | SAIN            | Bot wants to extract                                                                 |
+| ~60-70   | CombatSquadLayer     | SAIN            | Squad combat                                                                         |
+| ~60-70   | CombatSoloLayer      | SAIN            | Solo combat                                                                          |
 | **~62**  | **LootingLayer**     | **LootingBots** | **Peaceful + loot available (default in fork; one priority for all brain variants)** |
 
 
-**Note:** Older LootingBots builds used multiple fixed priorities (e.g. 4–13) per bot type. This fork uses **`BigBrainLootLayerPriority` (default 62)** for every registered brain — adjust in BepInEx config if you stack other mods.
+**Note:** Older LootingBots builds used multiple fixed priorities (e.g. 4–13) per bot type. This fork uses `**BigBrainLootLayerPriority` (default 62)** for every registered brain — adjust in BepInEx config if you stack other mods.
 
 **Result:** When a SAIN combat or extract layer is active with a **higher** priority than the loot layer, it wins. Loot/peace runs when those layers are inactive (typical defaults) or when priorities are tuned that way.
 
@@ -526,7 +527,7 @@ behavior mods depend on. It does not use BigBrain.
 
 - SAIN bots have access to more pathfinding surface (rooftops, interiors, off-path terrain)
 - LootingBots can pathfind to loot in areas the vanilla NavMesh didn't cover
-- AILimit deactivation is NavMesh-agnostic (operates on GameObject active state)
+- AILimit deactivation is NavMesh-agnostic (legacy path: `GameObject` inactive; with SAIN: bot may be pooled / dematerialized while squad state is offline)
 - Transparent to BigBrain layers — no layer priority consideration needed
 
 ---
@@ -539,15 +540,16 @@ the Unity GameObject level, below the behavior layer system.
 ### Dependency Chain
 
 - **Depends on**: SPT Core 4.0+, Fika (soft dependency)
-- **No dependency on**: BigBrain, SAIN, or any behavior mod
-- **Compatible with**: All mods (operates on `GameObject.SetActive()` independent of behavior)
+- **Optional compile + load order**: **SAIN** (`me.sol.sain`, soft BepInEx dependency; `AILimit.csproj` references `SAIN.csproj`). When SAIN is present and the bot has a `BotComponent`, distance deactivate / reactivate prefers `BotManagerComponent.Dematerialization.RequestDematerialize` / `RequestRematerialize` (offline squad + pool) and falls back to legacy `GameObject.SetActive` if dematerialize fails (e.g. pool full) or SAIN is absent.
+- **No dependency on**: BigBrain, LootingBots, or other behavior mods
+- **Compatible with**: All mods; without SAIN, AILimit behaves as stock distance deactivation.
 
 ### Integration Points
 
 1. **Bot Activation/Deactivation**: `AILimitComponent` subscribes to `botSpawnerClass.OnBotCreated`
   and `OnBotRemoved`. On each update cycle (~300 frames), it sorts all bots by distance to nearest
-   human player, activates the closest `BotLimit` bots, and deactivates the rest via
-   `GameObject.SetActive(false)`.
+  human player, activates the closest `BotLimit` bots, and deactivates the rest via
+  SAIN dematerialization when available, otherwise `GameObject.SetActive(false)`.
 2. **BotStandBy Integration**: Before deactivation, calls `standBy.method_1()` (standby pause)
   and sets `standBy.NextCheckTime = Time.time + 1000f` to prevent wake-up.
 3. **Spawn Timer**: New bots enter an `eligibleNow = false` state with a Timer that fires after
@@ -558,13 +560,13 @@ the Unity GameObject level, below the behavior layer system.
 ### Relationship with SAIN's Internal AI Limit
 
 
-| Aspect          | SPT-AILimit                                | SAIN AI Limit (internal)                      |
-| --------------- | ------------------------------------------ | --------------------------------------------- |
-| Mechanism       | `GameObject.SetActive(false)` — binary off | Bot tier throttling (None/Far/VeryFar/Narnia) |
-| CPU impact      | Zero (disabled objects don't tick)         | Reduced (subsystems skip work)                |
-| Distance config | Per-map distances (80-400m)                | Tiers: Far=100m, VeryFar=200m, Narnia=300m    |
-| Re-evaluation   | Every ~~300 frames (~~5s)                  | Per frame (ShallTick)                         |
-| Bot count limit | `BotLimit` (default 10)                    | N/A (throttles, doesn't disable)              |
+| Aspect          | SPT-AILimit                                                                  | SAIN AI Limit (internal)                      |
+| --------------- | ---------------------------------------------------------------------------- | --------------------------------------------- |
+| Mechanism       | SAIN dematerialize + pool when present; else `SetActive(false)` — binary off | Bot tier throttling (None/Far/VeryFar/Narnia) |
+| CPU impact      | Zero (disabled objects don't tick)                                           | Reduced (subsystems skip work)                |
+| Distance config | Per-map distances (80-400m)                                                  | Tiers: Far=100m, VeryFar=200m, Narnia=300m    |
+| Re-evaluation   | Every ~~300 frames (~~5s)                                                    | Per frame (ShallTick)                         |
+| Bot count limit | `BotLimit` (default 10)                                                      | N/A (throttles, doesn't disable)              |
 
 
 **Recommendation**: Can coexist. AILimit handles distant bot cleanup; SAIN's limit handles
@@ -667,16 +669,16 @@ It is the only server-only mod in this workspace.
 This section tracks how each mod interacts with others. Mark new entries as mods are added.
 
 
-| Mod                    | Depends On             | Integrates Via                                                | Conflicts With                                  | Notes                                     |
-| ---------------------- | ---------------------- | ------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------- |
-| **BigBrain**           | SPT Core 4.0+          | Direct Harmony patches                                        | None                                            | Framework; other mods depend on it        |
-| **SAIN**               | BigBrain, Waypoints    | `BrainManager.AddCustomLayer()`, `CustomLayer`, `CustomLogic` | Vanilla EFT combat layers (explicitly removed)  | Replaces all bot combat behavior          |
-| **LootingBots**        | BigBrain               | `BrainManager.AddCustomLayer()`, `CustomLayer`, `CustomLogic` | Vanilla `"Utility peace"`, `"LootPatrol"`       | Adds bot looting during peace state       |
-| **Waypoints**          | SPT Core               | NavMesh data + pathfinding patches                            | None                                            | Expanded NavMesh for all mods             |
-| **SPT-AILimit**        | SPT Core (Fika soft)   | `MonoBehaviour` on GameWorld, `GameObject.SetActive(false)`   | None                                            | Disables distant bots to save CPU         |
-| **botplacementsystem** | SPT Core (Fika soft)   | 13 Harmony patches into spawn system                          | **Unda** (both modify PMC spawns)               | Map limits, spawn distances, boss chances |
-| **spt-unda**           | SPT Core (server-only) | Replaces `PmcWaveGenerator`                                   | **botplacementsystem** (both modify PMC spawns) | PMCs as boss groups, all zones open       |
-| *(future mod)*         | —                      | —                                                             | —                                               | —                                         |
+| Mod                    | Depends On                        | Integrates Via                                                                      | Conflicts With                                  | Notes                                     |
+| ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------- |
+| **BigBrain**           | SPT Core 4.0+                     | Direct Harmony patches                                                              | None                                            | Framework; other mods depend on it        |
+| **SAIN**               | BigBrain, Waypoints               | `BrainManager.AddCustomLayer()`, `CustomLayer`, `CustomLogic`                       | Vanilla EFT combat layers (explicitly removed)  | Replaces all bot combat behavior          |
+| **LootingBots**        | BigBrain                          | `BrainManager.AddCustomLayer()`, `CustomLayer`, `CustomLogic`                       | Vanilla `"Utility peace"`, `"LootPatrol"`       | Adds bot looting during peace state       |
+| **Waypoints**          | SPT Core                          | NavMesh data + pathfinding patches                                                  | None                                            | Expanded NavMesh for all mods             |
+| **SPT-AILimit**        | SPT Core (Fika soft), SAIN (soft) | `MonoBehaviour` on GameWorld; SAIN `Dematerialization` + pool or `SetActive(false)` | None                                            | Disables distant bots to save CPU         |
+| **botplacementsystem** | SPT Core (Fika soft)              | 13 Harmony patches into spawn system                                                | **Unda** (both modify PMC spawns)               | Map limits, spawn distances, boss chances |
+| **spt-unda**           | SPT Core (server-only)            | Replaces `PmcWaveGenerator`                                                         | **botplacementsystem** (both modify PMC spawns) | PMCs as boss groups, all zones open       |
+| *(future mod)*         | —                                 | —                                                                                   | —                                               | —                                         |
 
 
 ---
@@ -715,29 +717,29 @@ When a new mod is added to this workspace, document its integration here:
 ## Known Integration Points Table
 
 
-| Integration Point            | Source Mod        | Target Mod        | Method                                        | Frequency               |
-| ---------------------------- | ----------------- | ----------------- | --------------------------------------------- | ----------------------- |
-| Combat layer registration    | SAIN              | BigBrain          | `BrainManager.AddCustomLayer()`               | Once at init            |
-| Looting layer registration   | LootingBots       | BigBrain          | `BrainManager.AddCustomLayer()`               | Once at init            |
-| Vanilla combat layer removal | SAIN              | BigBrain          | `BrainManager.RemoveLayer()`                  | Once at init            |
-| Vanilla loot layer removal   | LootingBots       | BigBrain          | `BrainManager.RemoveLayer()`                  | Once at init            |
-| Behavior execution           | BigBrain          | SAIN              | `CustomLayer.GetNextAction()`                 | Per decision (~10Hz)    |
-| Loot behavior execution      | BigBrain          | LootingBots       | `CustomLayer.GetNextAction()`                 | Per loot scan (~0.07Hz) |
-| Action ticking               | BigBrain          | SAIN              | `CustomLogic.Update()`                        | Per frame when active   |
-| Loot action ticking          | BigBrain          | LootingBots       | `CustomLogic.Update()`                        | Per frame when looting  |
-| Bot spawn tracking           | SAIN              | BigBrain          | `BrainManager.ActivatedBots`                  | Per spawn/despawn       |
-| NavMesh pathfinding          | SAIN, LootingBots | Waypoints         | Waypoints navmesh data                        | Per movement request    |
-| Squad visibility             | SAIN              | BigBrain          | Layer-agnostic (Unity job system)             | ~1Hz                    |
-| Loot prevention (interop)    | SAIN              | LootingBots       | `External.PreventBotFromLooting()`            | On combat enter         |
-| Force loot scan (interop)    | SAIN              | LootingBots       | `External.ForceBotToScanLoot()`               | On combat exit          |
-| Inventory check (interop)    | SAIN              | LootingBots       | `External.CheckIfInventoryFull()`             | On extract decision     |
-| Net loot value (interop)     | SAIN              | LootingBots       | `External.GetNetLootValue()`                  | On raid end             |
+| Integration Point            | Source Mod        | Target Mod        | Method                                                                        | Frequency               |
+| ---------------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------- | ----------------------- |
+| Combat layer registration    | SAIN              | BigBrain          | `BrainManager.AddCustomLayer()`                                               | Once at init            |
+| Looting layer registration   | LootingBots       | BigBrain          | `BrainManager.AddCustomLayer()`                                               | Once at init            |
+| Vanilla combat layer removal | SAIN              | BigBrain          | `BrainManager.RemoveLayer()`                                                  | Once at init            |
+| Vanilla loot layer removal   | LootingBots       | BigBrain          | `BrainManager.RemoveLayer()`                                                  | Once at init            |
+| Behavior execution           | BigBrain          | SAIN              | `CustomLayer.GetNextAction()`                                                 | Per decision (~10Hz)    |
+| Loot behavior execution      | BigBrain          | LootingBots       | `CustomLayer.GetNextAction()`                                                 | Per loot scan (~0.07Hz) |
+| Action ticking               | BigBrain          | SAIN              | `CustomLogic.Update()`                                                        | Per frame when active   |
+| Loot action ticking          | BigBrain          | LootingBots       | `CustomLogic.Update()`                                                        | Per frame when looting  |
+| Bot spawn tracking           | SAIN              | BigBrain          | `BrainManager.ActivatedBots`                                                  | Per spawn/despawn       |
+| NavMesh pathfinding          | SAIN, LootingBots | Waypoints         | Waypoints navmesh data                                                        | Per movement request    |
+| Squad visibility             | SAIN              | BigBrain          | Layer-agnostic (Unity job system)                                             | ~1Hz                    |
+| Loot prevention (interop)    | SAIN              | LootingBots       | `External.PreventBotFromLooting()`                                            | On combat enter         |
+| Force loot scan (interop)    | SAIN              | LootingBots       | `External.ForceBotToScanLoot()`                                               | On combat exit          |
+| Inventory check (interop)    | SAIN              | LootingBots       | `External.CheckIfInventoryFull()`                                             | On extract decision     |
+| Net loot value (interop)     | SAIN              | LootingBots       | `External.GetNetLootValue()`                                                  | On raid end             |
 | Layer priority arbitration   | BigBrain          | SAIN, LootingBots | Numeric priority (SAIN combat/extract > default loot ~62 unless reconfigured) | Per brain tick          |
-| NavMesh injection            | Waypoints         | EFT Core          | `NavMesh.AddNavMeshData()`                    | Per raid start          |
-| Pathfinding override         | Waypoints         | EFT Core          | `NavMesh.CalculatePath()` in `FindPath` patch | Per path request        |
-| Bot deactivation (distance)  | AILimit           | EFT Core          | `GameObject.SetActive(false)`                 | Every ~300 frames       |
-| Spawn limit override         | ABPS              | EFT Core          | `SetMaxBotCount`, `TryToSpawnInZone` patches  | Per spawn attempt       |
-| PMC wave generation          | Unda              | SPT Server        | `PmcWaveGenerator.ApplyWaveChangesToMap()`    | Per raid start          |
+| NavMesh injection            | Waypoints         | EFT Core          | `NavMesh.AddNavMeshData()`                                                    | Per raid start          |
+| Pathfinding override         | Waypoints         | EFT Core          | `NavMesh.CalculatePath()` in `FindPath` patch                                 | Per path request        |
+| Bot deactivation (distance)  | AILimit           | SAIN / EFT Core   | `Dematerialization` + pool, else `SetActive(false)`                           | Every ~300 frames       |
+| Spawn limit override         | ABPS              | EFT Core          | `SetMaxBotCount`, `TryToSpawnInZone` patches                                  | Per spawn attempt       |
+| PMC wave generation          | Unda              | SPT Server        | `PmcWaveGenerator.ApplyWaveChangesToMap()`                                    | Per raid start          |
 
 
 ---

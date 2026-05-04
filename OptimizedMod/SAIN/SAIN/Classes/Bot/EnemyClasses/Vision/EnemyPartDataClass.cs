@@ -68,6 +68,16 @@ public class EnemyPartDataClass
         RaycastResults[type].Update(castPoint, _colliderDictionary[colliderType], raycastHit, time);
     }
 
+    public BodyPartCollider GetBodyPartCollider(EBodyPartColliderType colliderType)
+    {
+        return _colliderDictionary.TryGetValue(colliderType, out BodyPartCollider collider) ? collider : null;
+    }
+
+    /// <summary>
+    /// Picks a collider (round-robin over <see cref="Colliders"/>) and returns its cast point and type.
+    /// <see cref="VisionRaycastJob"/> stores <see cref="SAINBodyPartRaycast.ColliderType"/> with the same ray;
+    /// <see cref="GetBodyPartCollider"/> resolves that type back to the dictionary — no mismatch within one batch write.
+    /// </summary>
     public SAINBodyPartRaycast GetRaycast()
     {
         BodyPartCollider collider = GetCollider();

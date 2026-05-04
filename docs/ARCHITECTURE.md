@@ -271,7 +271,12 @@ and **BotActions** (extending `CustomLogic<T>`):
 ```
 SAINLayer (abstract, extends CustomLayer)
   │
-  ├── CombatSoloLayer (priority: configurable, ~60-70)
+  ├── CombatSquadLayer (priority: configurable, default ~78 — above solo)
+  │   ├── SuppressAction        ← Suppressive fire
+  │   ├── RegroupAction         ← Move to squad
+  │   └── FollowSearchParty     ← Follow squad search
+  │
+  ├── CombatSoloLayer (priority: configurable, default ~77)
   │   ├── DogFightAction       ← CQB strafe/shoot
   │   ├── StandAndShootAction   ← Stationary shooting
   │   ├── RushEnemyAction       ← Aggressive push
@@ -284,15 +289,10 @@ SAINLayer (abstract, extends CustomLayer)
   │   ├── FreezeAction          ← Hold position
   │   └── MeleeAttackAction     ← Melee combat
   │
-  ├── CombatSquadLayer (priority: configurable, ~60-70)
-  │   ├── SuppressAction        ← Suppressive fire
-  │   ├── RegroupAction         ← Move to squad
-  │   └── FollowSearchParty     ← Follow squad search
-  │
   ├── SAINAvoidThreatLayer (priority: 80)
   │   └── (Avoid grenades/artillery)
   │
-  ├── ExtractLayer (priority: configurable)
+  ├── ExtractLayer (priority: configurable, default ~74)
   │   └── ExtractAction         ← Move to extract
   │
   └── DebugLayer (priority: 99)
@@ -303,25 +303,21 @@ SAINLayer (abstract, extends CustomLayer)
 **Layer priorities** determine which behavior wins when multiple layers want to be active:
 
 - Higher priority = checked/executed first
-- Debug (99) > Avoid Threat (80) > Squad/Combat (60-70) > Extract (configurable)
+- Debug (99) > Avoid Threat (80) > Squad combat (~~78) > Solo combat (~~77) > Extract (~74) — see `[LayerSettings](../OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs)`
 
 ### SAIN Decision Making (BotDecisionManager)
 
-Runs at a dynamic frequency (base 10Hz, throttled for distant bots):
+Runs at a dynamic frequency (base 10Hz, throttled for distant bots). **Full ranking + BigBrain mapping:** [SAIN_DECISION_AND_LAYER_RANKING.md](SAIN_DECISION_AND_LAYER_RANKING.md).
 
 ```
-BotDecisionManager.getDecision()
+BotDecisionManager.getDecision()   // ChooseEnemy() first; null → all None
   │
-  ├── SelfActionDecisions       ← Self-preservation (heal, reload, retreat)
-  ├── DogFightDecision          ← CQB encounter handling
-  ├── SquadDecisions            ← Team coordination
-  │   ├── Suppress
-  │   ├── Regroup
-  │   └── Search party
-  └── EnemyDecisions            ← Target engagement
-      ├── ChooseEnemy()         ← Select target from known enemies
-      ├── EnemyPathCheck
-      └── Engagement decisions
+  ├── SelfActionDecisions          ← Self-preservation (may force SeekCover + self)
+  ├── Tagilla / zombie / dogfight / melee / move-to-cover  ← early exits (see ranking doc)
+  ├── SquadDecisions               ← Team coordination (solo combat None)
+  │     → Suppress, Help, GroupSearch, PushSuppressedEnemy, …
+  └── EnemyDecisions               ← Personal combat (solo ≠ None, squad None)
+        → StandAndShoot, Rush, Search, Retreat, …
 ```
 
 ### SAIN AI Limit System
@@ -882,12 +878,14 @@ and adds offline combat resolution and audio spoofing for AI-vs-AI engagements t
 
 ### Design Principles
 
-| Principle | Description |
-|---|---|
-| **Player-centric** | Only bots the player can see or hear receive full AI processing. All others are throttled or resolved statistically. |
-| **Fake it when unseen** | AI-vs-AI combat outside the player's perception is resolved via statistical rolls, not real simulation. Audio cues are spoofed to maintain immersion. |
-| **Hard budget cap** | A 2ms-per-frame ceiling prevents AI from starving the render pipeline, regardless of bot count. |
-| **Perception-driven LOD** | Bots are tiered by what the player actually perceives (camera frustum + raycast, gunfire/sprint audibility), not arbitrary distance rings. |
+
+| Principle                 | Description                                                                                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Player-centric**        | Only bots the player can see or hear receive full AI processing. All others are throttled or resolved statistically.                                  |
+| **Fake it when unseen**   | AI-vs-AI combat outside the player's perception is resolved via statistical rolls, not real simulation. Audio cues are spoofed to maintain immersion. |
+| **Hard budget cap**       | A 2ms-per-frame ceiling prevents AI from starving the render pipeline, regardless of bot count.                                                       |
+| **Perception-driven LOD** | Bots are tiered by what the player actually perceives (camera frustum + raycast, gunfire/sprint audibility), not arbitrary distance rings.            |
+
 
 ### 1. AIFrameBudgetScheduler
 
@@ -900,20 +898,23 @@ is deferred to the next frame.
 
 **Key Methods and Interfaces:**
 
-| Member | Role |
-|---|---|
-| `MaxAIBudgetMs = 2.0f` | Hard ceiling on AI processing time per frame |
-| `RegisterBot(IBudgetedAI, PerceptionTier)` | Registers a bot in its tier list (Visible/Audible/Occluded) |
-| `UpdateBotTier(IBudgetedAI, PerceptionTier, PerceptionTier)` | Moves a bot between tier lists when perception changes |
-| `RegisterOfflineSquad(IOfflineSquad)` | Registers an offline squad for statistical combat |
-| `ProcessOfflineSquads()` | Ticks all offline squads first, respecting the budget |
-| `ProcessTier(List<IBudgetedAI>)` | Processes bots in one tier list, stopping if budget is exceeded |
-| `GetBudgetReport()` | Returns debug string with budget usage and tier counts |
+
+| Member                                                       | Role                                                            |
+| ------------------------------------------------------------ | --------------------------------------------------------------- |
+| `MaxAIBudgetMs = 2.0f`                                       | Hard ceiling on AI processing time per frame                    |
+| `RegisterBot(IBudgetedAI, PerceptionTier)`                   | Registers a bot in its tier list (Visible/Audible/Occluded)     |
+| `UpdateBotTier(IBudgetedAI, PerceptionTier, PerceptionTier)` | Moves a bot between tier lists when perception changes          |
+| `RegisterOfflineSquad(IOfflineSquad)`                        | Registers an offline squad for statistical combat               |
+| `ProcessOfflineSquads()`                                     | Ticks all offline squads first, respecting the budget           |
+| `ProcessTier(List<IBudgetedAI>)`                             | Processes bots in one tier list, stopping if budget is exceeded |
+| `GetBudgetReport()`                                          | Returns debug string with budget usage and tier counts          |
+
 
 **Integration:**
+
 - All bot components implement `IBudgetedAI` and register with the scheduler
 - The scheduler replaces the old per-mod tick loops (SAIN's `BotManagerComponent.ManualUpdate`,
-  LootingBots' per-frame `Update()`) with a unified budget-aware loop
+LootingBots' per-frame `Update()`) with a unified budget-aware loop
 - `PerceptionSystem` feeds tier changes to the scheduler via `UpdateBotTier()`
 
 ### 2. PerceptionSystem
@@ -926,23 +927,27 @@ visibility, 1.0s for audibility) to amortize cost.
 **Key File:** `OptimizedMod/OptimizationCore/PerceptionSystem.cs`
 
 **Supporting Files:**
+
 - `PerceptionTier.cs` — enum: `Visible`, `Audible`, `Occluded`
 - `IBudgetedAI.cs` — interface exposing `ProcessAITick()` and `CurrentTier { get; set; }`
 
 **Key Methods and Interfaces:**
 
-| Member | Role |
-|---|---|
-| `VisibilityCheckInterval = 0.5f` | Minimum time between visibility re-evaluations per bot |
-| `AudibilityCheckInterval = 1.0f` | Minimum time between audibility re-evaluations per bot |
-| `MaxHearingDistance = 200f` | Maximum distance for gunfire detection |
-| `SprintHearingDistance = 60f` | Maximum distance for sprint footsteps detection |
-| `GunfireHearingDuration = 3f` | How long after firing a bot remains "audible" |
+
+| Member                                         | Role                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| `VisibilityCheckInterval = 0.5f`               | Minimum time between visibility re-evaluations per bot                          |
+| `AudibilityCheckInterval = 1.0f`               | Minimum time between audibility re-evaluations per bot                          |
+| `MaxHearingDistance = 200f`                    | Maximum distance for gunfire detection                                          |
+| `SprintHearingDistance = 60f`                  | Maximum distance for sprint footsteps detection                                 |
+| `GunfireHearingDuration = 3f`                  | How long after firing a bot remains "audible"                                   |
 | `EvaluateBot(Vector3, int, bool, bool, float)` | Returns the bot's `PerceptionTier` based on position, sprint state, and gunfire |
-| `IsVisible(Vector3)` | Camera frustum test + raycast against HighPolyWithTerrainNoGrassMask |
-| `ClearCache(int)` | Clears cached tier/timing data for a despawned bot |
+| `IsVisible(Vector3)`                           | Camera frustum test + raycast against HighPolyWithTerrainNoGrassMask            |
+| `ClearCache(int)`                              | Clears cached tier/timing data for a despawned bot                              |
+
 
 **Visibility check flow:**
+
 ```
 1. CalculateFrustumPlanes(playerCamera) → 6 planes (updated every frame)
 2. Per bot (throttled to VisibilityCheckInterval):
@@ -953,6 +958,7 @@ visibility, 1.0s for audibility) to amortize cost.
 ```
 
 **Audibility check flow:**
+
 ```
 1. Per bot (throttled to AudibilityCheckInterval):
    a. recentlyFired AND timeSinceLastFire < 3s AND distance < 200m → audible
@@ -961,10 +967,11 @@ visibility, 1.0s for audibility) to amortize cost.
 ```
 
 **Integration:**
+
 - Replaces `SPT-AILimit` entirely in the optimized stack — AILimit's distance-based
-  `SetActive(false)` is replaced by perception-driven tier assignment
+`SetActive(false)` is replaced by perception-driven tier assignment
 - Feeds tier data to `AIFrameBudgetScheduler.UpdateBotTier()` so processing priority
-  follows what the player actually perceives
+follows what the player actually perceives
 - `IBudgetedAI.CurrentTier` is updated by the perception system and read by the scheduler
 
 ### 3. OfflineCombatResolver
@@ -978,21 +985,25 @@ was an ambush (power ratio > 2:1).
 **Key File:** `OptimizedMod/OptimizationCore/OfflineCombatResolver.cs`
 
 **Supporting Files:**
+
 - `IOfflineSquad.cs` — interface: `SquadId`, `SquadPosition`, `Members`, `IsInCombat`, `TickOffline()`
 - `OfflineCombatTypes.cs` — `OfflineBotStats` (WeaponDamageOutput, ArmorMitigation, HealthFactor,
-  EffectiveRange) and `OfflineCombatResult` (CasualtiesSideA/B, WinningSquadId, CombatDuration,
-  ShotDensity, CombatZoneCenter, IsAmbush)
+EffectiveRange) and `OfflineCombatResult` (CasualtiesSideA/B, WinningSquadId, CombatDuration,
+ShotDensity, CombatZoneCenter, IsAmbush)
 
 **Key Methods and Interfaces:**
 
-| Member | Role |
-|---|---|
-| `ResolveCombat(IOfflineSquad, IOfflineSquad)` | Resolves combat between two squads and returns an `OfflineCombatResult` |
-| `CalculateSquadPower(IReadOnlyList<OfflineBotStats>)` | Sums `WeaponDamageOutput × ArmorMitigation × HealthFactor` across all squad members |
-| `OfflineBotStats` | Stat block per bot: weapon damage, armor, health, effective range |
-| `OfflineCombatResult` | Resolution output: casualties, winner, duration, weapon types, zone center, ambush flag |
+
+| Member                                                | Role                                                                                    |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `ResolveCombat(IOfflineSquad, IOfflineSquad)`         | Resolves combat between two squads and returns an `OfflineCombatResult`                 |
+| `CalculateSquadPower(IReadOnlyList<OfflineBotStats>)` | Sums `WeaponDamageOutput × ArmorMitigation × HealthFactor` across all squad members     |
+| `OfflineBotStats`                                     | Stat block per bot: weapon damage, armor, health, effective range                       |
+| `OfflineCombatResult`                                 | Resolution output: casualties, winner, duration, weapon types, zone center, ambush flag |
+
 
 **Combat resolution algorithm:**
+
 ```
 1. Calculate power per squad: Σ(member.WeaponDamage × ArmorMitigation × Health)
 2. Roll with ±30% randomness: power × Random(0.7, 1.3)
@@ -1005,11 +1016,12 @@ was an ambush (power ratio > 2:1).
 ```
 
 **Integration:**
+
 - Called by `AIFrameBudgetScheduler` during `ProcessOfflineSquads()` for bots the player cannot see
 - Result is passed to `CombatAudioSpoofer.ScheduleCombatAudio()` so the player still hears distant
-  firefights
+firefights
 - Squads implement `IOfflineSquad` — the `TickOffline()` method updates squad state based on the
-  last `OfflineCombatResult` (removing casualties, tracking winners)
+last `OfflineCombatResult` (removing casualties, tracking winners)
 
 ### 4. CombatAudioSpoofer
 
@@ -1022,14 +1034,17 @@ trailing gunshot burst.
 
 **Key Methods and Interfaces:**
 
-| Member | Role |
-|---|---|
-| `MaxAudioDistance = 500f` | Beyond this distance, no audio is generated |
-| `ScheduleCombatAudio(OfflineCombatResult)` | Starts a coroutine that plays gunfire at the combat zone for the result's duration |
+
+| Member                                           | Role                                                                                                                   |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `MaxAudioDistance = 500f`                        | Beyond this distance, no audio is generated                                                                            |
+| `ScheduleCombatAudio(OfflineCombatResult)`       | Starts a coroutine that plays gunfire at the combat zone for the result's duration                                     |
 | `PlayCombatSequence(OfflineCombatResult, float)` | Coroutine: plays shots at `ShotDensity` interval with random position jitter (±5-20m), then a final burst of 1-3 shots |
-| `PlayGunshot(Vector3, float, bool)` | Plays a gunshot at a position with volume attenuation and optional muffled pass (volume × 0.3) |
+| `PlayGunshot(Vector3, float, bool)`              | Plays a gunshot at a position with volume attenuation and optional muffled pass (volume × 0.3)                         |
+
 
 **Audio behavior:**
+
 ```
 1. distance < 500m → schedule audio
 2. Shoot interval = 1 / max(ShotDensity, 0.2) seconds
@@ -1039,11 +1054,12 @@ trailing gunshot burst.
 ```
 
 **Integration:**
+
 - Fed by `OfflineCombatResolver` results via `AIFrameBudgetScheduler`
 - Completely decoupled from real AI processing — audio is generated purely from the statistical
-  combat result
+combat result
 - The player hears gunfire that matches the resolved combat's weapon types, duration, and
-  intensity without any real AI simulation cost
+intensity without any real AI simulation cost
 
 ---
 
@@ -1079,6 +1095,4 @@ Tarkov AI/
         ├── IOfflineSquad.cs          ← TickOffline() interface
         └── OfflineCombatTypes.cs     ← OfflineBotStats, OfflineCombatResult
 ```
-
-
 

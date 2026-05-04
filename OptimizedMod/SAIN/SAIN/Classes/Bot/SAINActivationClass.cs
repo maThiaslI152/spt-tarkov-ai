@@ -80,6 +80,18 @@ public class SAINActivationClass(BotComponent botComponent) : BotComponentClassB
         ActiveLayer = layer;
     }
 
+    /// <summary>
+    /// Re-run activation gates without the rest of <see cref="ManualUpdate"/> (layer toggles).
+    /// Used by <c>AIFrameBudgetScheduler</c> so external re-activation (e.g. AILimit) can clear
+    /// <see cref="BotActive"/> deadlocks before the scheduler skips the bot.
+    /// </summary>
+    public void RecheckExternal()
+    {
+        CheckGameEnding();
+        CheckBotActive();
+        CheckStandBy();
+    }
+
     public override void ManualUpdate()
     {
         CheckGameEnding();

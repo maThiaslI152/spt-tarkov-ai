@@ -44,6 +44,23 @@ public class PerformanceSettings : SAINSettingsBase<PerformanceSettings>, ISAINS
     [Advanced]
     public int MaxRaycastsPerEnemy = 3;
 
+    [Name("Single-part vision beyond distance (m)")]
+    [Description(
+        "Beyond this distance to an enemy, `VisionRaycastJob` checks only one body part (center-of-mass style) instead of every part — saves CPU. "
+            + "Does not apply when `Vision use full parts for human beyond distance` is on for human targets."
+    )]
+    [MinMax(50f, 500f, 5f)]
+    [Advanced]
+    public float VisionSinglePartBeyondDistanceMeters = 150f;
+
+    [Name("Vision: full body parts for human beyond distance")]
+    [Description(
+        "When on, human (PMC/Player) targets keep full per-part raycasts beyond `Vision single-part beyond distance`. "
+            + "AI-vs-AI targets still use single-part beyond that distance. Costs more CPU on open maps."
+    )]
+    [Advanced]
+    public bool VisionUseFullPartsForHumanBeyondDistance = false;
+
     [Name("Far Bot CPU Reduction")]
     [Description("Multiplier applied to vision-related CPU cost for bots in the 'Far' AI limit tier. 0.5 = half cost.")]
     [MinMax(0.1f, 1f, 100f)]

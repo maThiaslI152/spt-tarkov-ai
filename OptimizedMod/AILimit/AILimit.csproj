@@ -72,6 +72,11 @@
     </Reference>
   </ItemGroup>
 
+  <!-- SAIN: dematerialize / pool seam (Phase 2 AILimit integration) -->
+  <ItemGroup>
+    <ProjectReference Include="..\SAIN\SAIN.csproj" />
+  </ItemGroup>
+
   <!-- Post-Build: copy DLL to SPT plugins -->
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec Command="copy &quot;$(TargetPath)&quot; &quot;$(SPTRoot)\BepInEx\plugins\$(TargetFileName)&quot;" />

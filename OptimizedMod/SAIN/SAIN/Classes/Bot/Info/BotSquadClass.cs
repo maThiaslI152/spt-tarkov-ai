@@ -2,6 +2,8 @@
 using EFT;
 using SAIN.BotController.Classes;
 using SAIN.Components;
+using SAIN.Models.Enums;
+using SAIN.SAINComponent.Classes.EnemyClasses;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -24,13 +26,52 @@ public class BotSquadContainer : BotComponentClassBase
 
     public void RemoveFromSquad()
     {
+        unsubscribeFromEngagementEvents();
         SquadInfo = null;
         getSquad();
     }
 
     private void getSquad()
     {
+        unsubscribeFromEngagementEvents();
         SquadInfo = BotManagerComponent.Instance.BotSquads.GetSquad(Bot.BotOwner);
+        subscribeToEngagementEvents();
+    }
+
+    private void subscribeToEngagementEvents()
+    {
+        if (SquadInfo != null)
+        {
+            SquadInfo.OnMemberReportedPlayerEngagement += onMemberReportedPlayerEngagement;
+        }
+    }
+
+    private void unsubscribeFromEngagementEvents()
+    {
+        if (SquadInfo != null)
+        {
+            SquadInfo.OnMemberReportedPlayerEngagement -= onMemberReportedPlayerEngagement;
+        }
+    }
+
+    /// <summary>
+    /// When a squad member reports being engaged by a human player, ensure this bot
+    /// is aware of the player and marks them as actively hostile.
+    /// </summary>
+    private void onMemberReportedPlayerEngagement(IPlayer player, Vector3 lastKnownPos, BotComponent reportingBot)
+    {
+        if (Bot == null || !Bot.BotActive || Bot.IsDead)
+            return;
+
+        if (player == null)
+            return;
+
+        Enemy enemy = Bot.EnemyController.CheckAddEnemy(player);
+        if (enemy == null)
+            return;
+
+        // Mark the enemy as actively engaging so the bot treats them as an immediate threat
+        enemy.Status.SetVulnerableAction(EEnemyAction.Shooting);
     }
 
     public Squad SquadInfo { get; private set; }

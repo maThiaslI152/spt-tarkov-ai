@@ -61,7 +61,8 @@ internal static class SAINInterop
         {
             _SAINInteropInited = true;
 
-            _SAINExternalType = Type.GetType("SAIN.Plugin.External, SAIN");
+            // Must match QuestingBots (and other mods) — see SPTQuestingBots Client …/SAINInterop.cs
+            _SAINExternalType = Type.GetType("SAIN.Interop.SAINExternal, SAIN");
 
             // Only try to get the methods if we have the type
             if (_SAINExternalType != null)

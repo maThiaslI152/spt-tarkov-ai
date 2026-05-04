@@ -191,6 +191,15 @@ public class BotComponent : BotComponentBase, ISPlayer
         set { BotActivation.SetActiveLayer(value); }
     }
 
+    /// <summary>
+    /// Re-evaluate SAIN activation gates (game ending, player active, EFT bot state, standby).
+    /// Call before budget scheduling when another mod may have re-activated the bot GameObject.
+    /// </summary>
+    public void RecheckActivation()
+    {
+        BotActivation?.RecheckExternal();
+    }
+
     public void ManualUpdate(float currentTime, float deltaTime)
     {
         BotOwner botOwner = BotOwner;

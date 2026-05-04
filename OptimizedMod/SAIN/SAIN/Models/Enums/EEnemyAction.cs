@@ -9,4 +9,5 @@ public enum EEnemyAction
     UsingSurgery = 4,
     TryingToExtract = 5,
     Looting = 6,
+    Shooting = 7,
 }

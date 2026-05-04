@@ -32,7 +32,8 @@ public static class AssemblyInfoClass
     public const string RealismModKey = "RealismMod";
 
     public const string SPTGUID = "com.SPT.core";
-    public const string QuestingBotsGUID = "com.DanW.QuestingBots";
+    /// <summary>Must match <c>QuestingBots.Shared.ModInfo.GUID</c> (BepInEx key is case-sensitive).</summary>
+    public const string QuestingBotsGUID = "com.danw.questingbots";
     public const string FikaGUID = "com.fika.core";
     public const string FikaHeadlessGUID = "com.fika.headless";
     public const string LootingBotsGUID = "me.skwizzy.lootingbots";

@@ -120,6 +120,16 @@ public class AIFrameBudgetScheduler
             return;
         }
 
+        foreach (var bot in allBots)
+        {
+            if (bot == null || bot.IsDead)
+            {
+                continue;
+            }
+
+            bot.RecheckActivation();
+        }
+
         // Collect and tier all bots
         var visibleBots = new List<BotComponent>();
         var audibleBots = new List<BotComponent>();
@@ -142,6 +152,27 @@ public class AIFrameBudgetScheduler
         {
             ProcessBot(bot, currentTime, deltaTime);
             BotsProcessedThisFrame++;
+        }
+
+        // Also classify force-tick bots into their perception tiers so the
+        // VisibleBotsLastFrame / AudibleBotsLastFrame / OccludedBotsLastFrame
+        // CSV columns are accurate during combat — these bots are the ones
+        // most likely to be Visible (they have enemies, are in combat, etc.).
+        foreach (var bot in forceTickBots)
+        {
+            var tier = bot.CurrentPerceptionTier;
+            switch (tier)
+            {
+                case PerceptionTier.Visible:
+                    visibleBots.Add(bot);
+                    break;
+                case PerceptionTier.Audible:
+                    audibleBots.Add(bot);
+                    break;
+                default:
+                    occludedBots.Add(bot);
+                    break;
+            }
         }
 
         foreach (var bot in allBots)
@@ -169,7 +200,7 @@ public class AIFrameBudgetScheduler
         VisibleBotsLastFrame = visibleBots.Count;
         AudibleBotsLastFrame = audibleBots.Count;
         OccludedBotsLastFrame = occludedBots.Count;
-        TotalOnlineBots = visibleBots.Count + audibleBots.Count + occludedBots.Count;
+        TotalOnlineBots = forceTickBots.Count + visibleBots.Count + audibleBots.Count + occludedBots.Count;
 
         SortTierByCombatPriority(visibleBots);
         SortTierByCombatPriority(audibleBots);
@@ -284,8 +315,13 @@ public class AIFrameBudgetScheduler
 
     private static bool IsAutoManagedSquad(OfflineSquad squad)
     {
-        return squad?.SquadId != null
-            && squad.SquadId.StartsWith("auto_", StringComparison.Ordinal);
+        if (squad?.SquadId == null)
+        {
+            return false;
+        }
+
+        return squad.SquadId.StartsWith("auto_", StringComparison.Ordinal)
+            || squad.SquadId.StartsWith("demat_", StringComparison.Ordinal);
     }
 
     private float _lastOfflineCombatTime;

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using SAIN.Helpers;
 using SAIN.Models.Enums;
 using SAIN.Models.Structs;
@@ -14,6 +15,105 @@ namespace SAIN.Components;
 
 public class VisionRaycastJob : BotManagerBase
 {
+    public readonly struct VisionRaycastDiagnosticsSnapshot
+    {
+        public VisionRaycastDiagnosticsSnapshot(
+            long attemptsLineOfSight,
+            long attemptsVision,
+            long attemptsShoot,
+            long hitsNullLineOfSight,
+            long hitsNullVision,
+            long hitsNullShoot,
+            long hitsTargetLineOfSight,
+            long hitsTargetVision,
+            long hitsTargetShoot,
+            long hitsBlockedLineOfSight,
+            long hitsBlockedVision,
+            long hitsBlockedShoot,
+            long effectiveSuccessLineOfSight,
+            long effectiveSuccessVision,
+            long effectiveSuccessShoot)
+        {
+            AttemptsLineOfSight = attemptsLineOfSight;
+            AttemptsVision = attemptsVision;
+            AttemptsShoot = attemptsShoot;
+            HitsNullLineOfSight = hitsNullLineOfSight;
+            HitsNullVision = hitsNullVision;
+            HitsNullShoot = hitsNullShoot;
+            HitsTargetLineOfSight = hitsTargetLineOfSight;
+            HitsTargetVision = hitsTargetVision;
+            HitsTargetShoot = hitsTargetShoot;
+            HitsBlockedLineOfSight = hitsBlockedLineOfSight;
+            HitsBlockedVision = hitsBlockedVision;
+            HitsBlockedShoot = hitsBlockedShoot;
+            EffectiveSuccessLineOfSight = effectiveSuccessLineOfSight;
+            EffectiveSuccessVision = effectiveSuccessVision;
+            EffectiveSuccessShoot = effectiveSuccessShoot;
+        }
+
+        public long AttemptsLineOfSight { get; }
+        public long AttemptsVision { get; }
+        public long AttemptsShoot { get; }
+        public long HitsNullLineOfSight { get; }
+        public long HitsNullVision { get; }
+        public long HitsNullShoot { get; }
+        public long HitsTargetLineOfSight { get; }
+        public long HitsTargetVision { get; }
+        public long HitsTargetShoot { get; }
+        public long HitsBlockedLineOfSight { get; }
+        public long HitsBlockedVision { get; }
+        public long HitsBlockedShoot { get; }
+
+        /// <summary>Rays that would advance <see cref="RaycastResult.TimeLastSuccess"/> (null hit OR target collider/root).</summary>
+        public long EffectiveSuccessLineOfSight { get; }
+
+        public long EffectiveSuccessVision { get; }
+        public long EffectiveSuccessShoot { get; }
+    }
+
+    public static VisionRaycastDiagnosticsSnapshot GetDiagnosticsSnapshot()
+    {
+        return new VisionRaycastDiagnosticsSnapshot(
+            Interlocked.Read(ref _attemptsLos),
+            Interlocked.Read(ref _attemptsVision),
+            Interlocked.Read(ref _attemptsShoot),
+            Interlocked.Read(ref _hitsNullLos),
+            Interlocked.Read(ref _hitsNullVision),
+            Interlocked.Read(ref _hitsNullShoot),
+            Interlocked.Read(ref _hitsTargetLos),
+            Interlocked.Read(ref _hitsTargetVision),
+            Interlocked.Read(ref _hitsTargetShoot),
+            Interlocked.Read(ref _hitsBlockedLos),
+            Interlocked.Read(ref _hitsBlockedVision),
+            Interlocked.Read(ref _hitsBlockedShoot),
+            Interlocked.Read(ref _effectiveSuccessLos),
+            Interlocked.Read(ref _effectiveSuccessVision),
+            Interlocked.Read(ref _effectiveSuccessShoot));
+    }
+
+    /// <summary>
+    /// Clears cumulative vision-ray telemetry so per-raid CSV deltas match this raid only.
+    /// Called from <see cref="BotManagerComponent.Activate"/>.
+    /// </summary>
+    public static void ResetDiagnosticsForNewRaid()
+    {
+        Interlocked.Exchange(ref _attemptsLos, 0);
+        Interlocked.Exchange(ref _attemptsVision, 0);
+        Interlocked.Exchange(ref _attemptsShoot, 0);
+        Interlocked.Exchange(ref _hitsNullLos, 0);
+        Interlocked.Exchange(ref _hitsNullVision, 0);
+        Interlocked.Exchange(ref _hitsNullShoot, 0);
+        Interlocked.Exchange(ref _hitsTargetLos, 0);
+        Interlocked.Exchange(ref _hitsTargetVision, 0);
+        Interlocked.Exchange(ref _hitsTargetShoot, 0);
+        Interlocked.Exchange(ref _hitsBlockedLos, 0);
+        Interlocked.Exchange(ref _hitsBlockedVision, 0);
+        Interlocked.Exchange(ref _hitsBlockedShoot, 0);
+        Interlocked.Exchange(ref _effectiveSuccessLos, 0);
+        Interlocked.Exchange(ref _effectiveSuccessVision, 0);
+        Interlocked.Exchange(ref _effectiveSuccessShoot, 0);
+    }
+
     private static readonly QueryParameters _losParams = new(LayerMaskClass.HighPolyWithTerrainNoGrassMask);
     private static readonly QueryParameters _visParams = new(LayerMaskClass.AI);
     private static readonly QueryParameters _shootParams = new(LayerMaskClass.HighPolyWithTerrainMaskAI);
@@ -28,13 +128,35 @@ public class VisionRaycastJob : BotManagerBase
         get { return SAINPlugin.LoadedPreset?.GlobalSettings?.General?.Performance; }
     }
 
+    private static float VisionSinglePartBeyondDistanceMetersClamped
+    {
+        get
+        {
+            var s = PerfSettings;
+            if (s == null)
+            {
+                return 150f;
+            }
+
+            return Mathf.Clamp(s.VisionSinglePartBeyondDistanceMeters, 50f, 500f);
+        }
+    }
+
+    private static bool VisionUseFullPartsForHumanBeyondDistance
+    {
+        get { return PerfSettings != null && PerfSettings.VisionUseFullPartsForHumanBeyondDistance; }
+    }
+
     private static float VisionJobInterval
     {
         get
         {
             var settings = PerfSettings;
             if (settings != null && settings.PerformanceMode)
-                return 1f / settings.VisionRaycastFrequency;
+            {
+                float hz = Mathf.Max(1f, settings.VisionRaycastFrequency);
+                return 1f / hz;
+            }
             return 1f / 30f;
         }
     }
@@ -45,7 +167,10 @@ public class VisionRaycastJob : BotManagerBase
         {
             var settings = PerfSettings;
             if (settings != null && settings.PerformanceMode)
-                return 1f / settings.LookUpdateFrequency;
+            {
+                float hz = Mathf.Max(1f, settings.LookUpdateFrequency);
+                return 1f / hz;
+            }
             return 1f / 30f;
         }
     }
@@ -56,7 +181,9 @@ public class VisionRaycastJob : BotManagerBase
         {
             var settings = PerfSettings;
             if (settings != null && settings.PerformanceMode)
-                return settings.MaxRaycastsPerEnemy;
+            {
+                return Mathf.Clamp(settings.MaxRaycastsPerEnemy, 1, 3);
+            }
             return 3;
         }
     }
@@ -92,15 +219,27 @@ public class VisionRaycastJob : BotManagerBase
                 {
                     int partCount = _enemies[0].Vision.EnemyParts.PartsArray.Length;
                     int raycastChecks = MaxRaycastChecks;
-                    int totalRaycasts = enemyCount * partCount * raycastChecks;
+                    int commandCount = CountScheduledRayCommands(_enemies, enemyCount, partCount, raycastChecks);
+                    if (commandCount <= 0)
+                    {
+                        yield return wait;
+                        continue;
+                    }
 
-                    NativeArray<RaycastHit> hits = new(totalRaycasts, Allocator.TempJob);
-                    NativeArray<RaycastCommand> commands = new(totalRaycasts, Allocator.TempJob);
+                    NativeArray<RaycastHit> hits = new(commandCount, Allocator.TempJob);
+                    NativeArray<RaycastCommand> commands = new(commandCount, Allocator.TempJob);
 
-                    CreateCommands(commands, enemyCount, partCount, raycastChecks);
+                    int written = CreateCommands(commands, enemyCount, partCount, raycastChecks);
+#if DEBUG
+                    if (written != commandCount)
+                    {
+                        Logger.LogError(
+                            $"[VisionRaycastJob] Command count mismatch: counted={commandCount}, written={written}. Vision batch may be wrong.");
+                    }
+#endif
                     _handle = RaycastCommand.ScheduleBatch(commands, hits, 32);
 
-                    yield return wait;
+                    yield return null;
 
                     _handle.Complete();
                     AnalyzeHits(hits, commands, enemyCount, partCount, raycastChecks);
@@ -117,7 +256,6 @@ public class VisionRaycastJob : BotManagerBase
     private IEnumerator UpdateEFTVision()
     {
         yield return null;
-        var _eftVisionWait = new WaitForSeconds(VisionUpdateInterval);
         while (BotController != null && !_disposed)
         {
             var allBots = BotController.BotSpawnController?.SAINBots;
@@ -134,7 +272,7 @@ public class VisionRaycastJob : BotManagerBase
                     }
                 }
             }
-            yield return _eftVisionWait;
+            yield return null;
         }
     }
 
@@ -159,7 +297,75 @@ public class VisionRaycastJob : BotManagerBase
 
     private JobHandle _handle;
 
-    private void CreateCommands(NativeArray<RaycastCommand> raycastCommands, int enemyCount, int partCount, int raycastChecks)
+    /// <summary>
+    /// Mirrors per-enemy scheduling in <see cref="CreateCommands"/> so native buffer length matches
+    /// <see cref="RaycastCommand.ScheduleBatch"/> work (skipped VeryFar / reduced parts and checks).
+    /// </summary>
+    private static int CountScheduledRayCommands(List<Enemy> enemies, int enemyCount, int partCount, int raycastChecks)
+    {
+        int total = 0;
+        for (int i = 0; i < enemyCount; i++)
+        {
+            if (!TryGetEnemyRaycastSchedule(enemies[i], partCount, raycastChecks, out int effectivePartCount, out int effectiveChecks))
+            {
+                continue;
+            }
+
+            int perPart = 1 + (effectiveChecks >= 2 ? 1 : 0) + (effectiveChecks >= 3 ? 1 : 0);
+            total += effectivePartCount * perPart;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// False when no rays are scheduled for this enemy (VeryFar AI, missing parts, etc.).
+    /// </summary>
+    private static bool TryGetEnemyRaycastSchedule(
+        Enemy enemy,
+        int partCount,
+        int raycastChecks,
+        out int effectivePartCount,
+        out int effectiveChecks)
+    {
+        effectivePartCount = 0;
+        effectiveChecks = 0;
+
+        if (enemy == null)
+        {
+            return false;
+        }
+
+        if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.VeryFar)
+        {
+            return false;
+        }
+
+        effectiveChecks = raycastChecks;
+        if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.Far)
+        {
+            effectiveChecks = Mathf.Min(raycastChecks, 2);
+        }
+
+        effectivePartCount = partCount;
+        float singlePartBeyond = VisionSinglePartBeyondDistanceMetersClamped;
+        if (enemy.RealDistance > singlePartBeyond
+            && !(VisionUseFullPartsForHumanBeyondDistance && !enemy.IsAI))
+        {
+            effectivePartCount = 1;
+        }
+
+        var parts = enemy.Vision?.EnemyParts?.PartsArray;
+        if (parts == null || parts.Length == 0)
+        {
+            return false;
+        }
+
+        effectivePartCount = Mathf.Min(effectivePartCount, parts.Length);
+        return true;
+    }
+
+    private int CreateCommands(NativeArray<RaycastCommand> raycastCommands, int enemyCount, int partCount, int raycastChecks)
     {
         _colliderTypes.Clear();
         _castPoints.Clear();
@@ -172,25 +378,12 @@ public class VisionRaycastJob : BotManagerBase
         for (int i = 0; i < enemyCount; i++)
         {
             var enemy = _enemies[i];
-            var botTransform = enemy.Bot.Transform;
-
-            // Skip raycasts for VeryFar/Narnia tier enemies (AI vs AI at long range)
-            if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.VeryFar)
+            if (!TryGetEnemyRaycastSchedule(enemy, partCount, raycastChecks, out int effectivePartCount, out int effectiveChecks))
+            {
                 continue;
-
-            // For Far tier enemies, reduce raycast checks
-            int effectiveChecks = raycastChecks;
-            if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.Far)
-            {
-                effectiveChecks = Mathf.Min(raycastChecks, 2);
             }
 
-            // For very distant enemies, check only center mass (single part)
-            int effectivePartCount = partCount;
-            if (enemy.RealDistance > 150f)
-            {
-                effectivePartCount = 1;
-            }
+            var botTransform = enemy.Bot.Transform;
 
             Vector3 eyePosition = botTransform.EyePosition;
             Vector3 weaponFirePort = botTransform.WeaponData.FirePort;
@@ -232,6 +425,8 @@ public class VisionRaycastJob : BotManagerBase
                 }
             }
         }
+
+        return commands;
     }
 
     private void AnalyzeHits(NativeArray<RaycastHit> raycastHits, NativeArray<RaycastCommand> commands, int enemyCount, int partCount, int raycastChecks)
@@ -243,22 +438,9 @@ public class VisionRaycastJob : BotManagerBase
         for (int i = 0; i < enemyCount; i++)
         {
             var enemy = _enemies[i];
-
-            // Skip analysis for enemies whose raycasts were skipped
-            if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.VeryFar)
+            if (!TryGetEnemyRaycastSchedule(enemy, partCount, raycastChecks, out int effectivePartCount, out int effectiveChecks))
+            {
                 continue;
-
-            // Match the same effective part count used in CreateCommands
-            int effectivePartCount = partCount;
-            if (enemy.RealDistance > 150f)
-            {
-                effectivePartCount = 1;
-            }
-
-            int effectiveChecks = raycastChecks;
-            if (enemy.IsAI && enemy.Bot.CurrentAILimit >= AILimitSetting.Far)
-            {
-                effectiveChecks = Mathf.Min(raycastChecks, 2);
             }
 
             var parts = enemy.Vision.EnemyParts.PartsArray;
@@ -269,7 +451,8 @@ public class VisionRaycastJob : BotManagerBase
                 Vector3 castPoint = _castPoints[colliderTypeCount];
                 colliderTypeCount++;
 
-                if (SAINPlugin.LoadedPreset.GlobalSettings.General.Debug.Gizmos.DrawLineOfSightGizmos)
+                var gizmos = SAINPlugin.LoadedPreset?.GlobalSettings?.General?.Debug?.Gizmos;
+                if (gizmos != null && gizmos.DrawLineOfSightGizmos)
                 {
                     var cmd = commands[hits];
                     var hit = raycastHits[hits];
@@ -283,18 +466,149 @@ public class VisionRaycastJob : BotManagerBase
                     }
                 }
 
-                part.SetLineOfSight(castPoint, colliderType, raycastHits[hits++], ERaycastCheck.LineofSight, time);
+                RaycastHit losHit = raycastHits[hits++];
+                ApplyRaycastAndRecord(part, castPoint, colliderType, losHit, ERaycastCheck.LineofSight, time);
 
                 if (effectiveChecks >= 2)
                 {
-                    part.SetLineOfSight(castPoint, colliderType, raycastHits[hits++], ERaycastCheck.Vision, time);
+                    RaycastHit visionHit = raycastHits[hits++];
+                    ApplyRaycastAndRecord(part, castPoint, colliderType, visionHit, ERaycastCheck.Vision, time);
                 }
 
                 if (effectiveChecks >= 3)
                 {
-                    part.SetLineOfSight(castPoint, colliderType, raycastHits[hits++], ERaycastCheck.Shoot, time);
+                    RaycastHit shootHit = raycastHits[hits++];
+                    ApplyRaycastAndRecord(part, castPoint, colliderType, shootHit, ERaycastCheck.Shoot, time);
                 }
             }
+        }
+    }
+
+    private static void ApplyRaycastAndRecord(
+        EnemyPartDataClass part,
+        Vector3 castPoint,
+        EBodyPartColliderType colliderType,
+        RaycastHit hit,
+        ERaycastCheck checkType,
+        float time)
+    {
+        RecordAttempt(checkType);
+        BodyPartCollider expectedCollider = part.GetBodyPartCollider(colliderType);
+        if (hit.collider == null)
+        {
+            RecordNullHit(checkType);
+        }
+        else if (IsTargetCollider(hit, expectedCollider))
+        {
+            RecordTargetHit(checkType);
+        }
+        else
+        {
+            RecordBlockedHit(checkType);
+        }
+
+        if (RaycastResult.CountsAsGameplaySuccess(hit, expectedCollider))
+        {
+            RecordEffectiveSuccess(checkType);
+        }
+
+        part.SetLineOfSight(castPoint, colliderType, hit, checkType, time);
+    }
+
+    private static bool IsTargetCollider(RaycastHit hit, BodyPartCollider expectedCollider)
+    {
+        if (hit.collider == null || expectedCollider?.Collider == null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(hit.collider, expectedCollider.Collider))
+        {
+            return true;
+        }
+
+        Transform hitRoot = hit.collider.transform?.root;
+        Transform targetRoot = expectedCollider.Collider.transform?.root;
+        return hitRoot != null && targetRoot != null && ReferenceEquals(hitRoot, targetRoot);
+    }
+
+    private static void RecordAttempt(ERaycastCheck checkType)
+    {
+        switch (checkType)
+        {
+            case ERaycastCheck.LineofSight:
+                Interlocked.Increment(ref _attemptsLos);
+                break;
+            case ERaycastCheck.Vision:
+                Interlocked.Increment(ref _attemptsVision);
+                break;
+            case ERaycastCheck.Shoot:
+                Interlocked.Increment(ref _attemptsShoot);
+                break;
+        }
+    }
+
+    private static void RecordNullHit(ERaycastCheck checkType)
+    {
+        switch (checkType)
+        {
+            case ERaycastCheck.LineofSight:
+                Interlocked.Increment(ref _hitsNullLos);
+                break;
+            case ERaycastCheck.Vision:
+                Interlocked.Increment(ref _hitsNullVision);
+                break;
+            case ERaycastCheck.Shoot:
+                Interlocked.Increment(ref _hitsNullShoot);
+                break;
+        }
+    }
+
+    private static void RecordTargetHit(ERaycastCheck checkType)
+    {
+        switch (checkType)
+        {
+            case ERaycastCheck.LineofSight:
+                Interlocked.Increment(ref _hitsTargetLos);
+                break;
+            case ERaycastCheck.Vision:
+                Interlocked.Increment(ref _hitsTargetVision);
+                break;
+            case ERaycastCheck.Shoot:
+                Interlocked.Increment(ref _hitsTargetShoot);
+                break;
+        }
+    }
+
+    private static void RecordBlockedHit(ERaycastCheck checkType)
+    {
+        switch (checkType)
+        {
+            case ERaycastCheck.LineofSight:
+                Interlocked.Increment(ref _hitsBlockedLos);
+                break;
+            case ERaycastCheck.Vision:
+                Interlocked.Increment(ref _hitsBlockedVision);
+                break;
+            case ERaycastCheck.Shoot:
+                Interlocked.Increment(ref _hitsBlockedShoot);
+                break;
+        }
+    }
+
+    private static void RecordEffectiveSuccess(ERaycastCheck checkType)
+    {
+        switch (checkType)
+        {
+            case ERaycastCheck.LineofSight:
+                Interlocked.Increment(ref _effectiveSuccessLos);
+                break;
+            case ERaycastCheck.Vision:
+                Interlocked.Increment(ref _effectiveSuccessVision);
+                break;
+            case ERaycastCheck.Shoot:
+                Interlocked.Increment(ref _effectiveSuccessShoot);
+                break;
         }
     }
 
@@ -308,7 +622,25 @@ public class VisionRaycastJob : BotManagerBase
             {
                 foreach (Enemy enemy in bot.EnemyController.EnemiesArray)
                 {
-                    if (enemy.ShallCheckLook(currentTime, out _))
+                    if (enemy == null)
+                    {
+                        continue;
+                    }
+
+                    bool shouldCheckLook = enemy.ShallCheckLook(currentTime, out _);
+
+                    // Combat-critical fast path:
+                    // keep raycasts alive for active/current enemies (especially human goal enemies)
+                    // even when the normal look-throttle gate is currently false.
+                    if (!shouldCheckLook)
+                    {
+                        if (ReferenceEquals(bot.GoalEnemy, enemy) || enemy.IsCurrentEnemy || (!enemy.IsAI && enemy.EnemyKnown))
+                        {
+                            shouldCheckLook = true;
+                        }
+                    }
+
+                    if (shouldCheckLook)
                     {
                         enemies.Add(enemy);
                     }
@@ -316,4 +648,20 @@ public class VisionRaycastJob : BotManagerBase
             }
         }
     }
+
+    private static long _attemptsLos;
+    private static long _attemptsVision;
+    private static long _attemptsShoot;
+    private static long _hitsNullLos;
+    private static long _hitsNullVision;
+    private static long _hitsNullShoot;
+    private static long _hitsTargetLos;
+    private static long _hitsTargetVision;
+    private static long _hitsTargetShoot;
+    private static long _hitsBlockedLos;
+    private static long _hitsBlockedVision;
+    private static long _hitsBlockedShoot;
+    private static long _effectiveSuccessLos;
+    private static long _effectiveSuccessVision;
+    private static long _effectiveSuccessShoot;
 }

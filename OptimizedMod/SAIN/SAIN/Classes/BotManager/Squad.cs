@@ -154,6 +154,13 @@ public class Squad
         return false;
     }
 
+    /// <summary>
+    /// Fired when a squad member is being engaged by a player (takes damage from / shoots at a human).
+    /// Other members can use this to become aware of the player's presence and hostility immediately,
+    /// bypassing normal RNG and distance checks.
+    /// </summary>
+    public event Action<IPlayer, Vector3, BotComponent> OnMemberReportedPlayerEngagement;
+
     public enum ESearchPointType
     {
         Hearing,
@@ -556,6 +563,76 @@ public class Squad
         }
     }
 
+    /// <summary>
+    /// Report that a squad member is being engaged by a player (receiving damage from a human-controlled PMC/Scav).
+    /// Propagates the enemy to all squad members with 100% reliability, bypassing normal RNG and distance checks
+    /// for exUsec (rogue) bots.
+    /// </summary>
+    /// <param name="player">The human player doing the engaging</param>
+    /// <param name="lastKnownPos">Last known position of the player</param>
+    /// <param name="reportingBot">The squad member who is under attack</param>
+    public void ReportPlayerEngagement(IPlayer player, Vector3 lastKnownPos, BotComponent reportingBot)
+    {
+        if (Members == null || Members.Count <= 1)
+            return;
+
+        foreach (var member in Members.Values)
+        {
+            if (member == null || !member.BotActive || member.IsDead)
+                continue;
+            if (member.ProfileId == reportingBot.ProfileId)
+                continue;
+
+            // exUsec (rogue) bots always share engagement info within the squad
+            bool isExUsec = member.Info?.Profile?.WildSpawnType == WildSpawnType.exUsec;
+            if (!isExUsec && !isInCommunicationRange(reportingBot, member))
+                continue;
+
+            // 100% propagation — no RNG for engagement reports
+            Enemy memberEnemy = member.EnemyController.CheckAddEnemy(player);
+            if (memberEnemy == null)
+                continue;
+
+            // Set the enemy's last known position as a hearing-based search point
+            // so the member can investigate or suppress the area
+            if (!lastKnownPos.Equals(default(Vector3)))
+            {
+                AddPointToSearch(
+                    lastKnownPos,
+                    100f,
+                    member,
+                    AISoundType.gun,
+                    player
+                );
+            }
+
+            // Mark the enemy as actively engaged (shooting at squad)
+            memberEnemy.Status.SetVulnerableAction(EEnemyAction.Shooting);
+        }
+
+        OnMemberReportedPlayerEngagement?.Invoke(player, lastKnownPos, reportingBot);
+    }
+
+    /// <summary>
+    /// Called when a squad member takes damage. The profile ID identifies which bot was hit.
+    /// If the attacker is a human player, propagates the engagement to the entire squad.
+    /// </summary>
+    private void memberWasHit(string hitMemberProfileId, DamageInfoStruct damageInfo, EBodyPart bodyPart, float damage)
+    {
+        IPlayer aggressor = damageInfo.Player?.iPlayer;
+        if (aggressor == null || aggressor.IsAI)
+            return;
+
+        if (!Members.TryGetValue(hitMemberProfileId, out BotComponent reportingBot)
+            || reportingBot == null || !reportingBot.BotActive || reportingBot.IsDead)
+        {
+            return;
+        }
+
+        Vector3 lastKnownPos = aggressor.Position;
+        ReportPlayerEngagement(aggressor, lastKnownPos, reportingBot);
+    }
+
     private void memberWasKilled(Player player, IPlayer lastAggressor, DamageInfoStruct lastDamageInfoStruct, EBodyPart lastBodyPart)
     {
 #if DEBUG
@@ -704,6 +781,14 @@ public class Squad
 
                 // Subscribe when this member is killed
                 bot.Player.OnPlayerDead += memberWasKilled;
+
+                // Subscribe to damage events so we can propagate player engagement squad-wide
+                string hitId = bot.ProfileId;
+                Action<DamageInfoStruct, EBodyPart, float> hitHandler = (dmg, part, val) =>
+                    memberWasHit(hitId, dmg, part, val);
+                bot.Player.BeingHitAction += hitHandler;
+                _hitDelegates[bot.ProfileId] = hitHandler;
+
                 if (Members.Count > 1)
                 {
                     getSquadPersonality();
@@ -734,6 +819,11 @@ public class Squad
             if (player != null)
             {
                 player.OnPlayerDead -= memberWasKilled;
+                if (_hitDelegates.TryGetValue(id, out var hitHandler))
+                {
+                    player.BeingHitAction -= hitHandler;
+                    _hitDelegates.Remove(id);
+                }
             }
             memberInfo.Bot.Decision.DecisionManager.OnDecisionMade -= memberMadeDecision;
             memberInfo.Dispose();
@@ -789,4 +879,7 @@ public class Squad
     private float _checkSquadTime;
     private float _maxReportActionRangeSqr;
     public const float LEADER_KILL_COOLDOWN = 60f;
+
+    // Tracks the BeingHitAction delegates per member so we can cleanly unsubscribe on removal.
+    private readonly Dictionary<string, Action<DamageInfoStruct, EBodyPart, float>> _hitDelegates = new();
 }

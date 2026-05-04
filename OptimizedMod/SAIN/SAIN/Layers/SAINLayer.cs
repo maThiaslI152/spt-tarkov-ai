@@ -100,20 +100,30 @@ public abstract class SAINLayer : CustomLayer
 
     protected bool CheckIsActiveWithCache(Func<bool> computeUncached)
     {
-        bool isCurrentlyActive = _cachedIsActive;
+        bool wasActive = _cachedIsActive;
+        bool isActiveNow = computeUncached();
 
-        if (isCurrentlyActive)
+        if (isActiveNow)
         {
-            return _cachedIsActive = computeUncached();
+            // Never throttle the active-to-active transition:
+            // BigBrain evaluates every frame (~33ms), and any stale-false
+            // window lets LootingBots / BotMind_Questing win the layer election.
+            _cachedIsActive = true;
         }
-
-        if (Time.time - _lastIsActiveCheckTime >= IsActiveCheckInterval)
+        else
         {
-            _lastIsActiveCheckTime = Time.time;
-            _cachedIsActive = computeUncached();
+            // When inactive, only update the cache at the throttle interval
+            // (prevents flapping due to brief None windows from the 10 Hz
+            // decision pipeline).  However, if we *were* active last check,
+            // accept the deactivation immediately — there is no stale-false risk.
+            if (wasActive || Time.time - _lastIsActiveCheckTime >= IsActiveCheckInterval)
+            {
+                _cachedIsActive = false;
+                _lastIsActiveCheckTime = Time.time;
+            }
+            return _cachedIsActive;
         }
-
-        return _cachedIsActive;
+        return true;
     }
 
     protected SAINLayer(BotOwner botOwner, int priority, string layerName, ESAINLayer eSainLayer) : base(botOwner, priority)

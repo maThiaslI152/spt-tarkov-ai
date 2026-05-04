@@ -22,6 +22,9 @@ internal class PresetHandler
 
     public static PresetEditorDefaults EditorDefaults;
 
+    /// <summary>True if <c>Presets/ConfigSettings.json</c> was deserialized this session.</summary>
+    public static bool EditorDefaultsLoadedFromDisk { get; private set; }
+
     public static void LoadCustomPresetOptions()
     {
         Load.LoadCustomPresetOptions(CustomPresetOptions);
@@ -90,13 +93,16 @@ internal class PresetHandler
         LoadedPreset.UpdateDefaults();
     }
 
-    public static void InitPresetFromDefinition(SAINPresetDefinition def, bool isCopy = false)
+    public static void InitPresetFromDefinition(SAINPresetDefinition def, bool isCopy = false, bool exportEditorDefaults = true)
     {
         if (def == null || def.IsCustom == false)
         {
             loadDefault();
             UpdateExistingBots();
-            ExportEditorDefaults();
+            if (exportEditorDefaults)
+            {
+                ExportEditorDefaults();
+            }
             return;
         }
 
@@ -119,7 +125,10 @@ internal class PresetHandler
             loadDefault();
         }
         UpdateExistingBots();
-        ExportEditorDefaults();
+        if (exportEditorDefaults)
+        {
+            ExportEditorDefaults();
+        }
     }
 
     public static void ExportEditorDefaults()
@@ -141,10 +150,12 @@ internal class PresetHandler
         if (Load.LoadObject(out PresetEditorDefaults editorDefaults, Settings, PresetsFolder))
         {
             EditorDefaults = editorDefaults;
+            EditorDefaultsLoadedFromDisk = true;
         }
         else
         {
             EditorDefaults = new PresetEditorDefaults(DefaultPreset);
+            EditorDefaultsLoadedFromDisk = false;
         }
     }
 

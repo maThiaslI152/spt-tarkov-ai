@@ -1,4 +1,5 @@
 using System.Text;
+using System.Reflection;
 using DrakiaXYZ.BigBrain.Brains;
 using EFT;
 using LootingBots.Components;
@@ -34,6 +35,11 @@ internal class LootingLayer : CustomLayer
     {
         var isBotActive = BotOwner.BotState == EBotState.Active;
         var isNotHealing = !BotOwner.Medecine.FirstAid.Have2Do && !BotOwner.Medecine.SurgicalKit.HaveWork;
+        if (IsUnderCombatPressureViaSain(BotOwner))
+        {
+            // Hard safety gate: if SAIN reports combat pressure, do not allow looting layer to preempt combat.
+            return false;
+        }
         return isBotActive && isNotHealing && _lootingBrain.IsBrainEnabled && (_lootFinder.IsScheduledScan || _lootingBrain.IsBotLooting);
     }
 
@@ -119,4 +125,37 @@ internal class LootingLayer : CustomLayer
     {
         return _lootingBrain.ActiveLoot == null;
     }
+
+    private static bool IsUnderCombatPressureViaSain(BotOwner botOwner)
+    {
+        if (!_sainInteropInitialized)
+        {
+            _sainInteropInitialized = true;
+            _sainExternalType = Type.GetType("SAIN.Interop.SAINExternal, SAIN");
+            _sainPressureMethod = _sainExternalType?.GetMethod(
+                "IsBotUnderCombatPressure",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                [typeof(BotOwner)],
+                null);
+        }
+
+        if (_sainPressureMethod == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _sainPressureMethod.Invoke(null, [botOwner]) is bool b && b;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool _sainInteropInitialized;
+    private static Type _sainExternalType;
+    private static MethodInfo _sainPressureMethod;
 }

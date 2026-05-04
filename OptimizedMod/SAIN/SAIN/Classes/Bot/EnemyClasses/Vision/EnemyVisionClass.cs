@@ -24,7 +24,18 @@ public class EnemyVisionClass(EnemyData enemyData) : EnemyBase(enemyData, enemyD
 
     public bool CanShoot
     {
-        get { return EnemyParts.CanShoot; }
+        get
+        {
+            // Human targets are the primary combat-critical case.
+            // If dedicated "shoot" rays are intermittently noisy (self-occlusion/muzzle edge cases)
+            // but LOS/visibility are valid, allow shooting decisions to proceed.
+            if (EnemyParts.CanShoot)
+            {
+                return true;
+            }
+
+            return !Enemy.IsAI && EnemyParts.LineOfSight && EnemyParts.CanBeSeen;
+        }
     }
 
     public float VisibleStartTime { get; private set; }
@@ -121,7 +132,9 @@ public class EnemyVisionClass(EnemyData enemyData) : EnemyBase(enemyData, enemyD
         }
         else
         {
-            IsVisible = EnemyInfo.IsVisible;
+            // Prefer EFT visibility when available, but fall back to SAIN part-based
+            // visibility so vision does not collapse to pure audio/last-known behavior.
+            IsVisible = EnemyInfo.IsVisible || EnemyParts.CanBeSeen;
         }
 
         if (IsVisible)
