@@ -1,6 +1,6 @@
 # SPT Tarkov AI — Progress Report
 
-> Last updated: 2026-05-06 | State: Single-tree SAIN under `OptimizedMod/SAIN/SAIN/`; raid perf CSV + F12 telemetry live in `**SAINPerfLog**`; SMART **offline slice** in **[SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md)**; BigBrain + Rogue **scope/status** in **[STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md)**
+> Last updated: 2026-05-06 | State: Single-tree SAIN under `OptimizedMod/SAIN/SAIN/`; raid perf CSV + F12 telemetry live in `**SAINPerfLog**`; SMART **Phase 1+2 shipped** (demat/remat lifecycle, auto materialization, pool telemetry); BigBrain + Rogue **scope/status** in **[STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md)**; PMC No-Combat **investigation paused** in **[STATUS-SAIN-PMC-NoCombat-Layers-Paused.md](STATUS-SAIN-PMC-NoCombat-Layers-Paused.md)**
 
 **Navigation (agents):** [INDEX.md](../INDEX.md) (full map) · [AGENTS.md](AGENTS.md) (read order, builds, hot paths)
 
@@ -23,10 +23,10 @@
 
 ---
 
-## Overall Status: 11/13 tasks complete (85%)
+## Overall Status: 12/14 tasks complete (86%)
 
-All Phases 1–4 have been implemented in the `OptimizedMod/` forked source files.
-**Build verified today** — 9 of 10 client mods compile with 0 errors and are deployed to SPT.
+All Phases 1–4 have been implemented in the `OptimizedMod/` forked source files, and **SMART Phase 1+2 (demat/remat lifecycle, auto materialization, pool telemetry, spawn-event CSV) shipped in the latest build**.
+**Build verified** — 9 of 10 client mods compile with 0 errors and are deployed to SPT.
 Two items remain blocked pending SPT runtime on Windows.
 
 ---
@@ -88,6 +88,64 @@ This establishes a reproducible, map-aware baseline before code changes: the nex
 
 1. **Factory:** early rows with high `FrameTimeMs` and `BudgetMs ≈ 0` should show `NonSainFrameMs ≈ FrameTimeMs`, large `WorstFrameMsInInterval`, and `SpawnsThisInterval > 0` when bots activate.  
 2. **Lighthouse/Streets:** confirm `PoolReturnsThisInterval` / `Pooled` vs `DespawnsThisInterval` under waves.
+
+---
+
+## 2026-05-06 Session: Smart demat/remat Phase 1+2 — shipped components + spawn-pool telemetry
+
+### Findings
+
+| Area | Notes |
+| ---- | ----- |
+| **AILimit park → demat handoff gap** | `BotDematerializationController.RequestDematerialize` could be called on already-parked/demat bots, producing duplicate pool returns and telemetry skew (`PoolReturnRejectedCount`). |
+| **Remat activation burst** | Proximity-based `demat_*` rematerialization (hearing + LOS gates) could activate multiple bots on the same frame, spiking `NonSainFrameMs` and contributing to intermittent frame-time jitter. |
+| **Auto materialization affinity** | When a player nears an `auto_*`-simulated fight zone, the first auto-vs-auto combat roll that produces a real bot kill should **stop offline simulation** for the surviving bot and **materialize it live**; without a cap-gated handoff, large waves could materialize too many bots at once. |
+
+### Fixes shipped
+
+| Component | File(s) | What Changed |
+| --------- | ------- | ------------ |
+| **`SmartDematSystems`** | `OptimizedMod/SAIN/SAIN/Components/SmartDematSystems.cs` | Centralized demat decision logic: distance + LOS gates for `demat_*`; hearing recheck before remat; `DematParkReason` enum for telemetry attribution. |
+| **`AutoSquadMaterialization`** | `OptimizedMod/SAIN/SAIN/Components/AutoSquadMaterialization.cs` | Live-bot materialization from `auto_*` offline combat results when player nears; cap-gated (`MaxAutoMatPerFrame`) to prevent activation burst; `AutoMatAppliedDelta` in perf CSV. |
+| **`BotSpawnPoolBridge`** | `OptimizedMod/SAIN/SAIN/Components/BotSpawnPoolBridge.cs` | Coordinates `BotSpawnController` spawn waves with pool rematerialization; avoids duplicate `OnBotActivated` / `RemoveBot` accounting. |
+| **BotGameObjectPool telemetry** | `OptimizedMod/SAIN/SAIN/Components/BotGameObjectPool.cs` | `ActivePooledCount`, `PoolHitCount` / `PoolMissCount` / `PoolReturnCount` / `PoolReturnRejectedCount` (telemetry-only counters). |
+| **BotSpawnController counters** | `OptimizedMod/SAIN/SAIN/Classes/BotManager/BotSpawnController.cs` | `BotsAddedTotal` / `BotsRemovedTotal` incremented in `OnBotActivated` / `RemoveBot`. |
+| **Pool return idempotency** | `BotGameObjectPool.ReturnToPool` | Duplicate-return guard: `PoolReturnRejectedCount` increments when a bot is already pooled, preventing double-pool from corrupting the queue. |
+
+### Spawn-event telemetry (SAINPerfLog)
+
+| Area | Notes |
+| ---- | ----- |
+| **Perf CSV columns** | Added `NonSainFrameMs`, `WorstFrameMsInInterval`, `SpawnsThisInterval`, `DespawnsThisInterval`, `PoolHitsThisInterval`, `PoolMissesThisInterval`, `PoolReturnsThisInterval`, `PoolReturnRejectsThisInterval`, `GcAllocDeltaKb`. |
+| **Spawn Event Log (F12)** | New F12 `4. Spawn Event Log` → `SpawnEventCsvLogger` writes `sain_spawn_events_*.csv` with per-event spawn/despawn/pool-return rows and `AutoMat` tagging. |
+| **F12 path line** | Active spawn-file path shown in F12 status for quick identification. |
+
+### Why this matters
+
+This delivers the **materialize-side** of the demat→pool→remat lifecycle with frame-burst protection and full telemetry attribution. The shipped components close the loop for `demat_*` (AILimit-parked bots) and establish the infrastructure for `auto_*` offline-to-online handoff. Phase G of the optimization plan (cap per-frame activation spikes) now has the telemetry columns it needs as exit criteria.
+
+---
+
+## 2026-05-06 Session: PMC No-Combat layers — investigation documented and paused
+
+### Finding
+
+| Area | Notes |
+| ---- | ----- |
+| **PMC engagement gap** | On large maps (Customs `bigmap`), typical PMC / assault bots rarely enter SAIN combat layers despite non-zero vision ray work. **Looting** and patrol-type layers dominate telemetry. |
+| **Bloodhounds unaffected** | Boss / event spawns (Bloodhounds, Goons) can engage normally — they use different brains, so their engagement is **not** proof that the PMC combat path is healthy. |
+| **BotMind ruled partially out** | Session `edd84743` on Customs had `Enable Questing = false`, `Enable MedicBuddy = false`, `PMCs Do Quests = false`. Layer histogram **no longer** showed `BotMind_Questing` — quest layer removed as dominant contender, but **PMC combat gap remained**. |
+| **AILimit latch ruled out** | `SainBotsTotal = SainBotsSampled` (17/17), `SkippedBots = 0` — not the classic deadlock signature (`SainBotsSampled` ≪ `SainBotsTotal`). |
+| **Vision rays are running** | `VisionRayAttempt*` / `VisionRayEffective*` are non-trivial; the gap is in **goal / combat classification**, not ray scheduling. |
+
+### Status
+
+| Area | Notes |
+| ---- | ----- |
+| **Investigation** | **Paused** — full-raid playtest cycles (menu → load → raid → extract) are too slow for tight iteration. |
+| **Documented** | New **[STATUS-SAIN-PMC-NoCombat-Layers-Paused.md](STATUS-SAIN-PMC-NoCombat-Layers-Paused.md)** with session evidence, ruled-out hypotheses, and resume checklist. |
+| **Cross-reference** | Overlaps with `GoalHuman*` finalization path ([BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md](BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md)); same-frame handoff shipped but did **not** resolve the PMC engagement problem on this Customs run. |
+| **Resume guidance** | When work resumes: (1) `BotDecisionManager` / `ChooseEnemy` / `CurrentCombatDecision` path, (2) layer arbitration (Phase F), (3) targeted single-bot logging for `ChooseEnemy` null reason, squad order flags. |
 
 ---
 
