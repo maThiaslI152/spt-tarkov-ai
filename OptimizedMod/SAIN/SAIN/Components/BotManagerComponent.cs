@@ -109,8 +109,11 @@ public class BotManagerComponent : MonoBehaviour
         BudgetScheduler = new AIFrameBudgetScheduler();
         OfflineSquadWorldSync.ResetForNewRaid();
         VisionRaycastJob.ResetDiagnosticsForNewRaid();
+        SainDematPolicy.ResetForNewRaid();
+        SmartDematTelemetry.ResetForNewRaid();
         Pool = new BotGameObjectPool();
         Dematerialization = new BotDematerializationController(this);
+        BotSpawnPoolBridge.RaidStartProbePoolPull();
 
         SyncAiFrameBudgetFromPreset();
 
@@ -145,6 +148,9 @@ public class BotManagerComponent : MonoBehaviour
         MaybeLogBigBrainArbitrationHints(currentTime);
         OfflineSquadWorldSync.TrySync(this, currentTime);
         OfflineSquadMaterialization.TryRematerializeDematSquadsNearHumans(this, currentTime);
+        OfflineSquadMaterialization.TryRematerializeDematSquadsLosFromHumans(this, currentTime);
+        AutoSquadMaterialization.TryTick(this, currentTime, deltaTime);
+        SmartDematerializeGate.TryApply(this, currentTime, deltaTime);
         BudgetScheduler.ProcessFrame(BotSpawnController.SAINBots, currentTime, deltaTime);
     }
 

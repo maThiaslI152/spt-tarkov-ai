@@ -46,6 +46,7 @@ public class PerfLogPlugin : BaseUnityPlugin
     private static ConfigEntry<string> F12BudgetLine { get; set; }
     private static ConfigEntry<string> F12BotsLine { get; set; }
     private static ConfigEntry<string> F12CsvLine { get; set; }
+    internal static ConfigEntry<bool> SpawnEventLog { get; private set; }
 
     private Harmony _harmony;
 
@@ -122,6 +123,11 @@ public class PerfLogPlugin : BaseUnityPlugin
             "3. BigBrain verbose sample",
             false,
             "When Diagnostic Logging is on: log active BigBrain layer for every human-proximate SAIN bot on the diag interval (not only mismatches).");
+        SpawnEventLog = Config.Bind(
+            cat,
+            "4. Spawn Event Log",
+            false,
+            "Write sain_spawn_events_*.csv with per-frame spawn/despawn/pool counter deltas (verbose; use for short repro raids).");
 
         F12FpsLine = Config.Bind(cat, "─ FPS / Frame Time", "--", new ConfigDescription("Rolling average (read-only).", null, readOnly));
         F12BudgetLine = Config.Bind(cat, "─ AI Budget", "--", new ConfigDescription("Scheduler budget (read-only).", null, readOnly));
@@ -195,7 +201,8 @@ public class PerfLogPlugin : BaseUnityPlugin
 
         string perf = string.IsNullOrEmpty(RaidPerfCsvLogger.ActivePerfCsvPath) ? "(no active raid)" : RaidPerfCsvLogger.ActivePerfCsvPath;
         string bb = string.IsNullOrEmpty(RaidPerfCsvLogger.ActiveBigBrainCsvPath) ? "(snapshots off or not started)" : RaidPerfCsvLogger.ActiveBigBrainCsvPath;
-        F12CsvLine.Value = $"perf: {perf} | bigbrain: {bb}";
+        string spawnEv = string.IsNullOrEmpty(SpawnEventCsvLogger.ActivePath) ? "(spawn log off or not started)" : SpawnEventCsvLogger.ActivePath;
+        F12CsvLine.Value = $"perf: {perf} | bigbrain: {bb} | spawn: {spawnEv}";
     }
 
     private sealed class RollingAverage

@@ -1,6 +1,6 @@
 # BUGFIX — BigBrain Priority Arbitration (QuestingBots vs SAIN Combat)
 
-> Last updated: 2026-05-03
+> Last updated: 2026-05-03 | **Doc tidied:** 2026-05-06 (§3 squad text matches current `CombatSquadLayer` / coordinator)  
 > Scope: `OptimizedMod/SAIN/SAIN/`
 
 ---
@@ -73,16 +73,20 @@ Result: enough signal to confirm BigBrain arbitration issues in-raid; verbose mo
 
 See also: [`docs/BIGBRAIN_LAYER_MATRIX.md`](BIGBRAIN_LAYER_MATRIX.md).
 
-## 3) Squad coordination conflict guard (related behavior stabilizer)
+## 3) Squad layer vs solo combat (related — see also AI work-stop fix)
 
 Files:
+
 - `OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs`
 - `OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs`
+- `OptimizedMod/SAIN/SAIN/Classes/Bot/Decision/BotDecisionManager.cs` (coordinator defer + `SetSquadDecision` preserves `CurrentCombatDecision`)
 
-- Squad coordinator skips squad decision writes when member solo combat decision is active.
-- Squad layer remains active only when solo combat decision is `None`.
+**Current behavior (post [BUGFIX-AIWorkStop-LayerCacheAndSquad.md](BUGFIX-AIWorkStop-LayerCacheAndSquad.md)):**
 
-Result: reduces run-stop jitter and prevents squad writes from stomping solo combat decisions.
+- **`CombatSquadLayer.IsActive()`** does **not** deactivate merely because `CurrentCombatDecision != None`. The squad layer stays on when the coordinator has an active squad order / TTL state or rogue-defense bootstrap needs a coordination pass (see in-file comments in `CombatSquadLayer.cs`).
+- **`DistributeTargets` / flanking** no longer skip members in solo combat; `SetSquadDecision` keeps existing combat decisions so **solo and squad layers can both be meaningful** during the same engagement.
+
+Older one-line summaries of “squad only when combat is None” described **pre-fix** behavior and are obsolete.
 
 ---
 

@@ -3,6 +3,7 @@ using EFT;
 using SAIN.Components;
 using SAIN.Components.PlayerComponentSpace;
 using SAIN.Helpers;
+using SAIN.Preset.GlobalSettings;
 using UnityEngine;
 
 namespace SAIN.SAINComponent.Classes.EnemyClasses;
@@ -42,6 +43,7 @@ public class EnemyListController : BotSubClass<SAINEnemyController>, IBotClass
     public override void ManualUpdate()
     {
         compareEnemyLists();
+        scanForNearbyHumanPlayers();
 #if DEBUG
         if (SAINPlugin.DebugMode)
         {
@@ -434,11 +436,59 @@ public class EnemyListController : BotSubClass<SAINEnemyController>, IBotClass
         }
     }
 
+    /// <summary>
+    /// Proactively scans for human players within range and adds them as enemies.
+    /// This bridges the gap when EFT's BotsGroup hasn't flagged the player yet on large maps,
+    /// ensuring nearby human players are always tracked by SAIN's enemy system.
+    /// </summary>
+    private void scanForNearbyHumanPlayers()
+    {
+        if (_nextHumanScanTime > Time.time)
+            return;
+        _nextHumanScanTime = Time.time + HUMAN_SCAN_FREQ;
+
+        var gw = GameWorldComponent.Instance;
+        if (gw == null) return;
+
+        // Use the AILimit ranges to determine max scan distance
+        var aiLimit = GlobalSettingsClass.Instance?.General?.AILimit;
+        float maxScanDistSqr = HUMAN_SCAN_RANGE * HUMAN_SCAN_RANGE;
+        if (aiLimit?.AILimitRanges != null)
+        {
+            // Scan out to at least Narnia range to proactively detect players
+            float range = Mathf.Max(HUMAN_SCAN_RANGE,
+                aiLimit.AILimitRanges.TryGetValue(AILimitSetting.Narnia, out float n) ? n : 400f);
+            maxScanDistSqr = range * range;
+        }
+
+        foreach (var human in gw.PlayerTracker.AlivePlayerArray)
+        {
+            if (human == null || human.IsAI || human.ProfileId == Bot.ProfileId)
+                continue;
+
+            // Skip if already an enemy
+            if (Enemies.ContainsKey(human.ProfileId))
+                continue;
+
+            // Distance check
+            Vector3 toHuman = human.Transform.Position - Bot.Position;
+            if (toHuman.sqrMagnitude > maxScanDistSqr)
+                continue;
+
+            // Add as enemy proactively
+            if (human.Player != null)
+                tryAddEnemy(human.Player);
+        }
+    }
+
     private static bool validateComponents(IPlayer person)
     {
         return person != null && person.IsAI && person.AIData.BotOwner.GetPlayer == null;
     }
 
     private float _nextCompareListsTime;
-    private const float COMPARE_ENEMY_LIST_FREQ = 1;
+    private float _nextHumanScanTime;
+    private const float COMPARE_ENEMY_LIST_FREQ = 0.1f;
+    private const float HUMAN_SCAN_FREQ = 0.25f;
+    private const float HUMAN_SCAN_RANGE = 250f;
 }

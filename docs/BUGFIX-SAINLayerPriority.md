@@ -1,6 +1,7 @@
 # Bugfix: SAIN Combat Layers Blocked by BotMind — Bots Not Fighting (Priority Conflict)
 
-> **Date:** 2026-05-03 | **Status:** Fixed & Deployed | **File:** `OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs`
+> **Date:** 2026-05-03 | **Doc tidied:** 2026-05-06 (defaults + boss registration aligned with repo)  
+> **Status:** Fixed & Deployed | **File:** `OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs` (+ `BigBrainHandler` validation)
 
 ---
 
@@ -19,106 +20,97 @@
 
 BigBrain selects which `CustomLayer` controls a bot at any moment. The **highest-priority active layer wins**. Priority is an integer: higher number = higher priority.
 
-### What Went Wrong
+### What Went Wrong (historical)
 
-SAIN's combat layers for regular bots (PMCs, Scavs, Rogues, Raiders) were registered at **priority 20-22**:
-
-```csharp
-// LayerSettings.cs (BEFORE FIX)
-SAINCombatSquadLayerPriority = 22;   // Squad combat — team tactics, target distribution
-SAINCombatSoloLayerPriority = 20;    // Solo combat — cover, aim, fire
-SAINExtractLayerPriority = 24;       // Extraction behavior
-```
-
-Meanwhile, BotMind's `MedicBuddyMedicLayer` and `MedicBuddyShooterLayer` layers are registered (likely at priorities 25-50). Since BigBrain picks the highest-priority active layer:
-
-```
-Priority 99: SAIN DebugLayer
-Priority 80: SAIN AvoidThreatLayer (grenade dodge)
-Priority 41-50: BotMind MedicBuddy layers (estimated)
-Priority 25-40: BotMind QuestingLayer (estimated)
-Priority 20-24: SAIN Combat layers ← TOO LOW, never activated
-Priority 4-13: LootingBots
-```
-
-**Result:** BotMind's patrol/medic/quest layers always had higher priority than SAIN's combat layers. Bots were permanently stuck in patrol mode because the combat layers could never activate.
-
-### Why Bosses Were Unaffected
-
-Bosses and followers use hardcoded priorities (not the config):
+SAIN's combat layers for regular bots (PMCs, Scavs, Rogues, Raiders) were originally registered at **priority ~20–22** in preset defaults — below typical BotMind quest/medic layers (~25–50). Combat layers rarely won arbitration.
 
 ```csharp
-// BigBrainHandler.cs - AddCustomLayersToBosses()
-BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, 70);
-BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, 69);
+// LayerSettings.cs (BEFORE first fix — illustrative)
+SAINCombatSquadLayerPriority = 22;
+SAINCombatSoloLayerPriority = 20;
+SAINExtractLayerPriority = 24;   // also above solo combat — bad ordering
 ```
 
-This is why the earlier Big Pipe fix (group combat awareness in `SAINAILimit`) was about perception tiering, not layer priority. Bosses already had correct combat priority.
+Meanwhile, BotMind's `MedicBuddyMedicLayer` / `MedicBuddyShooterLayer` and quest layers sit in a band that **beats** those low SAIN values when both are active.
+
+**Result:** BotMind patrol/medic/quest could permanently outrank SAIN combat; bots looked “stuck” in non-combat brains.
+
+### Bosses / followers / goons
+
+Registration uses the **same validated preset priorities** as PMCs (not a separate hardcoded low tier). Example from `BigBrainHandler.AddCustomLayersToBosses()`:
+
+```csharp
+LayerPrioritySet priorities = GetValidatedLayerPriorities();
+BrainManager.AddCustomLayer(typeof(CombatSquadLayer), brainList, priorities.Squad);
+BrainManager.AddCustomLayer(typeof(CombatSoloLayer), brainList, priorities.Solo);
+```
+
+So if preset combat priorities are wrong, **everyone** is affected; the old story “bosses were fine because 70/69” applied only to an **older** codebase where bosses had literals and PMCs did not.
 
 ---
 
-## Fix Applied
+## Fix Applied (timeline)
 
-Raised regular bot combat layer priorities to match the boss/follower defaults:
 
-| Setting | Before | After | File |
-|---|---|---|---|
-| `SAINCombatSquadLayerPriority` | 22 | **70** | `LayerSettings.cs` + `My Tuned Preset/GlobalSettings.json` |
-| `SAINCombatSoloLayerPriority` | 20 | **69** | Same |
-| `SAINExtractLayerPriority` | 24 | **65** | Same |
+| Milestone                 | `Squad` / `Solo` / `Extract` | Notes                                                                                                                                       |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Original bug              | ~22 / ~20 / ~24              | Combat below BotMind                                                                                                                        |
+| First fix (2026-05-03)    | **70 / 69 / 65**             | Combat above BotMind; extract below combat                                                                                                  |
+| **Current repo defaults** | **78 / 77 / 74**             | Room under `SAINAvoidThreatLayer` (80); `BigBrainHandler.GetValidatedLayerPriorities()` enforces `AvoidThreat(80) > Squad > Solo > Extract` |
 
-### New Layer Priority Stack
+
+Source of truth for numbers today: `LayerSettings.cs` defaults and `[MinMax]` caps (squad max 79, solo max 78, extract max 76).
+
+### Layer stack (current fork defaults)
 
 ```
 99: SAIN DebugLayer
-80: SAIN AvoidThreatLayer (grenade dodge)
-70: SAIN CombatSquadLayer       ← FIXED (was 22)
-69: SAIN CombatSoloLayer        ← FIXED (was 20)
-65: SAIN ExtractLayer           ← now below combat
-??: BotMind layers (overridden by combat when fighting)
-13: LootingBots
+80: SAIN AvoidThreatLayer
+78: SAIN CombatSquadLayer       (preset default)
+77: SAIN CombatSoloLayer
+74: SAIN ExtractLayer
+~62: LootingBots LootingLayer (BepInEx config; fork cap keeps it below extract)
 ```
 
-### Why Extract Changed Too
-
-Extraction was at 24 (above combat at 20-22). If a bot wanted to extract, it could override combat. Now extraction is at 65 (below combat at 69-70), so bots only extract when NOT in combat.
+Extraction must stay **below** solo combat so fights beat extract; squad remains **above** solo so coordinated squad arbitration can win when both are active.
 
 ---
 
 ## Files Changed
 
-| File | Change |
-|---|---|
-| `OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs` | Defaults: 22→70, 20→69, 24→65 |
-| `E:\SPT 4.0 Dev\BepInEx\plugins\SAIN\Presets\My Tuned Preset\GlobalSettings.json` | Same values in deployed config |
 
-### Why Both Files
+| File                                                                               | Role                                                                         |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `OptimizedMod/SAIN/SAIN/Preset/GlobalSettings/Categories/General/LayerSettings.cs` | Default priorities + min/max clamps                                          |
+| `OptimizedMod/SAIN/SAIN/Plugin/BigBrainHandler.cs`                                 | `GetValidatedLayerPriorities()` — normalizes invalid presets at registration |
 
-The C# code provides the **default** used when no config JSON exists. The JSON **overrides** the default when present. Since "My Tuned Preset" is the active preset, its JSON takes precedence. Both must match for consistency.
+
+On disk, the active preset’s `GlobalSettings.json` can **override** C# defaults; keep JSON aligned with intended stack when tuning.
 
 ---
 
-## Build & Deployment
+## Build & deployment
 
-- **Build:** `dotnet build -c Release` — 0 errors, 8 warnings
-- **Output:** `OptimizedMod/SAIN/bin/Release/netstandard2.1/SAIN.dll`
-- **Deployed to:** `E:\SPT 4.0 Dev\BepInEx\plugins\SAIN\SAIN.dll` + config JSON
-- **Timestamp:** 2026-05-03 16:30
+```bash
+dotnet build OptimizedMod/SAIN/SAIN.csproj -c Release
+```
+
+Deploy `SAIN.dll` per [MOD_BUILD_AND_DEPLOY.md](MOD_BUILD_AND_DEPLOY.md).
 
 ---
 
 ## Verification
 
-1. Restart SPT, start Lighthouse raid
-2. Enable **F12 → SAINPerfLog → `SAINPerfLog (F12)` → `2. Diagnostic Logging`**
-3. Approach bots and shoot at them
-4. Bots should **immediately return fire, seek cover, and flank** — no patrol/freeze behavior
-5. Check `BepInEx/LogOutput.log` for `[SAIN DIAG] TierChange:` entries — bots near you should transition from Occluded/Audible → Visible when combat starts
-6. No "Stuck check failed" warnings for bots near the player
+1. Restart SPT, start a raid
+2. Optional: **F12 → SAINPerfLog → diagnostic logging** for `[SAIN DIAG]` lines
+3. Engage bots — they should take cover and return fire instead of stuck patrol
+4. BigBrain / perf CSV: combat layers should appear in histograms under pressure
 
 ---
 
 ## Related
 
-- **[BUGFIX-SAINAILimit-Audibility.md](BUGFIX-SAINAILimit-Audibility.md)** — Earlier fix for the perception tier audibility checks (also deployed in this session)
-- **[PROGRESS.md](PROGRESS.md)** — Overall project progress tracker
+- **[BUGFIX-SAINAILimit-Audibility.md](BUGFIX-SAINAILimit-Audibility.md)** — Perception tier audibility (orthogonal to BigBrain priority)
+- **[BUGFIX-BigBrainPriority-QuestingBots.md](BUGFIX-BigBrainPriority-QuestingBots.md)** — QuestingBots vs combat arbitration
+- **[PROGRESS.md](PROGRESS.md)** — Session log
+

@@ -1,6 +1,7 @@
 # Bugfix: 0 Visible Bots in CSV Telemetry + Unused QueryParameters in Visibility Raycast
 
-> **Date:** 2026-05-04 | **Status:** Fixed & Deployed | **Files:** 2 files across SAIN + Scheduler
+> **Date:** 2026-05-04 | **Doc tidied:** 2026-05-06 (line refs + raycast “after” matches code)  
+> **Status:** Fixed & Deployed | **Files:** 2 files across SAIN + Scheduler
 
 ---
 
@@ -24,12 +25,12 @@ Despite 12 bots online and engaged in combat, the tier breakdown showed zero bot
 
 ### Root Cause A: Force-Tick Bots Excluded from Tier Counting (PRIMARY)
 
-**Location:** `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` (lines 157-177, original)
+**Location:** `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` — `ProcessFrame()` tiering (line numbers drift; search `forceTickBots` and `VisibleBotsLastFrame`).
 
-The `ProcessFrame()` method has three phases:
-1. **Collect force-tick bots** (lines 140-149) — bots with `ActiveHumanEnemy`, `GoalEnemy`, `KnownEnemies`, etc. These are the bots most likely to be Visible.
-2. **Process force-tick bots** (lines 151-155) — they always tick regardless of budget.
-3. **Classify non-force-tick bots by tier** (lines 157-177) — `VisibleBots`, `AudibleBots`, `OccludedBots` are counted here.
+The `ProcessFrame()` method (historical layout) had three phases:
+1. **Collect force-tick bots** — bots with `ActiveHumanEnemy`, `GoalEnemy`, `KnownEnemies`, etc. These are the bots most likely to be Visible.
+2. **Process force-tick bots** — they always tick regardless of budget.
+3. **Classify non-force-tick bots by tier** — `VisibleBots`, `AudibleBots`, `OccludedBots` were counted here only.
 
 **The bug:** Line 161-162 explicitly skips force-tick bots with:
 ```csharp
@@ -51,7 +52,7 @@ Combat scenario:
 
 ### Root Cause B: Unused QueryParameters in Visibility Raycast (SECONDARY)
 
-**Location:** `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs` (lines 243-244, original)
+**Location:** `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs` — `CheckPlayerCanSeeBot()` (historical)
 
 The `CheckPlayerCanSeeBot()` method declared `QueryParameters` with `QueryTriggerInteraction.Ignore` but never passed them to the raycast:
 
@@ -80,7 +81,7 @@ This is a secondary bug that could cause occasional false negatives in visibilit
 
 **File:** `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs`
 
-**Change:** Added a new classification loop (lines 157-176) after the force-tick processing loop that reads `bot.CurrentPerceptionTier` for each force-tick bot and adds them to the correct tier bucket:
+**Change:** After the force-tick processing loop, **classify each force-tick bot** into `visibleBots` / `audibleBots` / `occludedBots` using `bot.CurrentPerceptionTier` before counting non–force-tick bots:
 
 ```csharp
 // NEW — classify force-tick bots into their perception tiers so the
@@ -103,7 +104,7 @@ foreach (var bot in forceTickBots)
 }
 ```
 
-The existing non-force-tick classification loop (now lines 178-197) remains unchanged.
+The existing non-force-tick classification loop still skips `forceTickBots` so bots are not double-processed — only tier **counts** were wrong before the extra loop.
 
 **Effect:** After this fix, the combat scenario from above becomes:
 ```
@@ -117,25 +118,22 @@ Combat scenario (after fix):
   TotalOnlineBots      = 10    ← still correct
 ```
 
-### Fix 2: QueryParameters now passed to Physics.Raycast
+### Fix 2: Visibility raycast ignores triggers
 
 **File:** `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs`
 
-**Change:** Replaced the bare `int layerMask` overload with the `QueryParameters` overload, using the already-declared `raycastParams`:
+**Change:** Use a `Physics.Raycast` overload that passes **`QueryTriggerInteraction.Ignore`** (either via `QueryParameters` or the dedicated overload). The **current** shipping code uses the 5-argument overload:
 
 ```csharp
-// BEFORE:
 _cachedIsVisible = !Physics.Raycast(
-    cameraPos, direction.normalized, distance,
-    LayerMaskClass.HighPolyWithTerrainNoGrassMask);  // hits triggers
-
-// AFTER:
-_cachedIsVisible = !Physics.Raycast(
-    cameraPos, direction.normalized, distance,
-    raycastParams);  // ignores triggers
+    cameraPos,
+    direction.normalized,
+    distance,
+    LayerMaskClass.HighPolyWithTerrainNoGrassMask,
+    QueryTriggerInteraction.Ignore);
 ```
 
-**Effect:** Trigger colliders on the `HighPolyWithTerrainNoGrassMask` layer no longer cause false negatives in the visibility raycast. The raycast now correctly ignores trigger colliders and only reports hits on solid geometry (walls, terrain, obstacles).
+**Effect:** Zone / quest / extraction **trigger** colliders are less likely to false-block LOS compared to the old bare `layerMask` overload (which followed `Physics.queriesHitTriggers` / global defaults).
 
 ---
 
@@ -144,7 +142,7 @@ _cachedIsVisible = !Physics.Raycast(
 | # | File | Change |
 |---|------|--------|
 | 1 | `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` | Added force-tick bot tier classification loop after force-tick processing |
-| 2 | `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs` | Pass `QueryParameters` (with `QueryTriggerInteraction.Ignore`) to `Physics.Raycast` |
+| 2 | `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs` | `Physics.Raycast(..., QueryTriggerInteraction.Ignore)` in `CheckPlayerCanSeeBot()` |
 
 ---
 
@@ -154,9 +152,9 @@ _cachedIsVisible = !Physics.Raycast(
 
 The `forceTickBots.Contains(bot) continue;` check in the non-force-tick loop serves a legitimate purpose: it avoids processing bots twice (force-tick already processed them). The fix adds a separate counting loop specifically for the force-tick bots, keeping the processing loop and the non-force-tick classification loop untouched. This is the minimal change with zero risk of double-processing.
 
-### QueryParameters (Fix 2) — Why wasn't this caught earlier?
+### Trigger interaction (Fix 2)
 
-The `raycastParams` variable was declared at the same time as the raycast call, presumably during a refactoring pass. The developer created the `QueryParameters` instance intending to use it but forgot to update the raycast overload. The code compiled because both overloads (with and without `QueryParameters`) exist on `Physics.Raycast`, so the compiler chose the `int layerMask` overload as a closer match.
+An earlier revision built `QueryParameters` but called an overload that ignored them; the fix is to **always** route visibility through an overload that sets **`QueryTriggerInteraction.Ignore`** explicitly.
 
 ---
 

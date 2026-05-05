@@ -31,6 +31,24 @@ Two items remain blocked pending SPT runtime on Windows.
 
 ---
 
+## 2026-05-05 Session: Multi-map runtime triage (pre-fix baseline)
+
+### Findings documented
+
+| Area | Notes |
+| ---- | ----- |
+| **Cross-map symptom validation** | New telemetry runs confirm the player-visibility failure is not Lighthouse-only. Failing pattern appears on Lighthouse, Customs (`bigmap`), and Interchange; Reserve is partially better; Factory remains the control with healthier `GoalHumanFinal*` conversion. |
+| **BigBrain schema 8 evidence** | Multiple sessions show `GoalHumanCount > 0` while `GoalHumanFinalVisibleCount` / `GoalHumanFinalCanShootCount` remain near zero on non-Factory maps despite non-zero `VisionRayAttempt*` and, on some maps, non-zero `VisionRayEffective*`. |
+| **Arbitration signal** | Mismatch samples still include `thirdPartyOrVanilla` and pressure windows where `Looting` / `BotMind_Questing` dominate layer histograms. |
+| **Scheduler sanity** | Paired `sain_perf_*.csv` shows `BudgetExhaustedNow=0` and `ProcessedBots≈TotalOnline`; this is not explained by AI budget starvation. |
+| **Documentation** | Added [BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md](BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md) and linked from [INDEX.md](../INDEX.md). |
+
+### Why this matters
+
+This establishes a reproducible, map-aware baseline before code changes: the next patch pass can target (1) player visibility finalization handoff and (2) combat-pressure arbitration windows, with clear success criteria against `GoalHumanFinal*`, `VisionRayEffective*`, and mismatch counters.
+
+---
+
 ## 2026-05-05 Session: Vision job buffer alignment + blindness/stutter doc
 
 ### Delivered
@@ -53,6 +71,23 @@ Two items remain blocked pending SPT runtime on Windows.
 | **`VisionRaycastJob`** | Counters + `RaycastResult.CountsAsGameplaySuccess` in `ApplyRaycastAndRecord`; preset-driven **`VisionSinglePartBeyondDistanceMeters`** (50–500 clamp) + **`VisionUseFullPartsForHumanBeyondDistance`**. |
 | **`RaycastResult`** | Shared `CountsAsGameplaySuccess` used by `Update` and job telemetry. |
 | **Docs / INDEX** | `VISION_BLINDNESS_AND_STUTTER.md` §3.6–3.7; `SAIN_PERFLOG.md` interpretation; `SAIN_FORK_PRESET.md` performance table; `EnemyPartDataClass` XML note (GetRaycast vs batch pairing). |
+
+---
+
+## 2026-05-06 Session: Spawn-attribution perf columns + optional spawn-event CSV
+
+### Delivered
+
+| Area | Notes |
+| ---- | ----- |
+| **SAIN** | `BotGameObjectPool`: `ActivePooledCount`, `PoolHitCount` / `PoolMissCount` / `PoolReturnCount` / `PoolReturnRejectedCount` (telemetry only). `BotSpawnController`: `BotsAddedTotal` / `BotsRemovedTotal` (increment in `OnBotActivated` / `RemoveBot`). |
+| **SAINPerfLog** | Perf CSV: `NonSainFrameMs`, `WorstFrameMsInInterval`, spawn/despawn/pool deltas, `GcAllocDeltaKb`. F12 **`4. Spawn Event Log`** → `SpawnEventCsvLogger` (`sain_spawn_events_*.csv`). F12 active path line includes spawn file path. |
+| **Docs** | `SAIN_PERFLOG.md`, `INDEX.md` quick reference. |
+
+### In-game verification (manual)
+
+1. **Factory:** early rows with high `FrameTimeMs` and `BudgetMs ≈ 0` should show `NonSainFrameMs ≈ FrameTimeMs`, large `WorstFrameMsInInterval`, and `SpawnsThisInterval > 0` when bots activate.  
+2. **Lighthouse/Streets:** confirm `PoolReturnsThisInterval` / `Pooled` vs `DespawnsThisInterval` under waves.
 
 ---
 

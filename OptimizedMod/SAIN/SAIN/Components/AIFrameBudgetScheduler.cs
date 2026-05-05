@@ -57,6 +57,9 @@ public class AIFrameBudgetScheduler
     private readonly Stopwatch _frameTimer = new();
     private readonly List<OfflineSquad> _offlineSquads = new();
 
+    /// <summary>First auto-vs-auto offline resolution per unordered pair this raid — avoids stacking casualties every second.</summary>
+    private readonly HashSet<string> _autoAutoCasualtyPairKeys = new(StringComparer.Ordinal);
+
     /// <summary>Round-robin cursor for each tier (fairness when budget ends mid-list).</summary>
     private int _resumeVisibleIndex;
 
@@ -295,8 +298,25 @@ public class AIFrameBudgetScheduler
         }
     }
 
-    private static void ApplyOfflineCasualties(OfflineSquad squadA, OfflineSquad squadB, OfflineCombatResult result)
+    private void ApplyOfflineCasualties(OfflineSquad squadA, OfflineSquad squadB, OfflineCombatResult result)
     {
+        bool aAuto = squadA?.SquadId != null && squadA.SquadId.StartsWith("auto_", StringComparison.Ordinal);
+        bool bAuto = squadB?.SquadId != null && squadB.SquadId.StartsWith("auto_", StringComparison.Ordinal);
+        if (aAuto && bAuto)
+        {
+            string idA = squadA.SquadId;
+            string idB = squadB.SquadId;
+            string key = string.CompareOrdinal(idA, idB) < 0 ? idA + "|" + idB : idB + "|" + idA;
+            if (!_autoAutoCasualtyPairKeys.Add(key))
+            {
+                return;
+            }
+
+            squadA.PendingWorldCasualties = result.CasualtiesA;
+            squadB.PendingWorldCasualties = result.CasualtiesB;
+            return;
+        }
+
         if (IsAutoManagedSquad(squadA) || IsAutoManagedSquad(squadB))
         {
             return;
@@ -491,6 +511,7 @@ public class AIFrameBudgetScheduler
         OccludedBotsLastFrame = 0;
         _offlineSquads.Clear();
         _lastOfflineCombatTime = 0f;
+        _autoAutoCasualtyPairKeys.Clear();
     }
 }
 
@@ -506,4 +527,10 @@ public class OfflineSquad
     public Vector3 CenterPosition;
     public List<BotCombatStats> Members = new();
     public bool IsHostileToOtherFaction = true;
+
+    /// <summary>
+    /// For <c>auto_*</c> squads: casualties from the first statistical auto-vs-auto engagement this raid;
+    /// applied to matching live bots when the main player nears (<see cref="AutoSquadMaterialization"/>).
+    /// </summary>
+    public int PendingWorldCasualties;
 }

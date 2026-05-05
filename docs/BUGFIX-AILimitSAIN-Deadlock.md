@@ -1,6 +1,6 @@
 # BUGFIX: AILimit ↔ SAIN scheduler deadlock (frozen bots on quest / loot)
 
-> **Last updated:** 2026-05-04  
+> **Last updated:** 2026-05-06 (root-cause wording: dematerialize vs legacy `SetActive`)  
 > **Related:** [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md) (**full change record**), [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md), [SAIN_PERFLOG.md](SAIN_PERFLOG.md), `OptimizedMod/AILimit/Component.cs`, `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs`
 
 ## Symptom
@@ -11,12 +11,16 @@
 
 ## Root cause
 
-1. **AILimit** deactivates distant bots: `player.gameObject.SetActive(false)`, `owner.BotState = EBotState.NonActive`, clears `owner.Memory.GoalEnemy` (`OptimizedMod/AILimit/Component.cs`).
-2. **PlayerComponent** `IsActive` is derived from `gameObject.activeInHierarchy` (`PersonActiveClass.CheckActive`).
-3. **SAINActivationClass.CheckBotActive** sets `BotActive` false when `!PlayerComponent.IsActive` (`SAINActivationClass.cs`).
-4. **AIFrameBudgetScheduler** skips any bot with `!bot.BotActive` before calling `BotComponent.ManualUpdate` — so `CheckBotActive` never runs again to flip `BotActive` back to true after AILimit re-enables the GameObject.
+**Latch (still the core bug story):** When the bot’s player `GameObject` is inactive or otherwise fails `PlayerComponent.IsActive`, **SAIN** marks the bot inactive and the scheduler can skip `ManualUpdate` — so **SAINActivationClass** never gets another chance to clear the latch after the world wakes the bot back up.
 
-Result: a **one-way latch** — bots wake in EFT but stay frozen in SAIN forever.
+1. **AILimit** parks distant bots (`OptimizedMod/AILimit/Component.cs`):
+   - **Preferred (SAIN loaded):** `BotDematerializationController.RequestDematerialize` / `RequestRematerialize` (see Phase 2) — avoids hard `SetActive(false)` when the pool path succeeds.
+   - **Legacy fallback:** `player.gameObject.SetActive(false)`, `owner.BotState = EBotState.NonActive`, clears `owner.Memory.GoalEnemy` when dematerialize cannot run (no SAIN, missing `BotComponent`, pool full, etc.).
+2. **PlayerComponent** `IsActive` follows `gameObject.activeInHierarchy` (`PersonActiveClass.CheckActive`).
+3. **SAINActivationClass.CheckBotActive** sets `BotActive` false when `!PlayerComponent.IsActive` (`SAINActivationClass.cs`).
+4. **AIFrameBudgetScheduler** used to skip bots with `!bot.BotActive` before any path could re-run activation checks after AILimit turned the `GameObject` back on.
+
+Result (historical): a **one-way latch** — bots wake in EFT but stay frozen in SAIN until **Phase 1** `RecheckActivation()` runs every frame before tiering/skips.
 
 ## CSV evidence (example raid)
 

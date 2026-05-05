@@ -303,7 +303,7 @@ namespace AILimit
                         continue;
                     }
 
-                    if (!TrySainRematerialize(owner))
+                    if (!TrySainForceFullRematerialize(owner))
                     {
                         BotStandBy standBy = owner.StandBy;
                         standBy.Activate();
@@ -312,6 +312,33 @@ namespace AILimit
                     }
                 }
             }
+        }
+
+        /// <summary>Clears all SAIN park holders (used when AILimit plugin toggles off).</summary>
+        private static bool TrySainForceFullRematerialize(BotOwner owner)
+        {
+            if (owner == null)
+            {
+                return false;
+            }
+
+            BotManagerComponent mgr = BotManagerComponent.Instance;
+            if (mgr?.Dematerialization == null)
+            {
+                return false;
+            }
+
+            if (!owner.gameObject.TryGetComponent(out BotComponent sainBot))
+            {
+                return false;
+            }
+
+            if (!mgr.Dematerialization.IsDematerialized(sainBot.ProfileId))
+            {
+                return false;
+            }
+
+            return mgr.Dematerialization.RequestRematerialize(sainBot);
         }
 
         private static bool TrySainDematerialize(BotOwner owner)
@@ -358,7 +385,8 @@ namespace AILimit
                 return false;
             }
 
-            return mgr.Dematerialization.RequestRematerialize(sainBot);
+            DematReleaseResult r = mgr.Dematerialization.TryReleaseParkReason(sainBot, DematParkReason.Ailimit);
+            return r != DematReleaseResult.NotTracked;
         }
 
         private static bool IsSainDematerializedForOwner(BotOwner owner)
@@ -449,7 +477,11 @@ namespace AILimit
                             owner.BotState = EBotState.Active;
                         }
                     }
-                    botCount++;
+
+                    if (player.gameObject.activeSelf && owner.BotState == EBotState.Active)
+                    {
+                        botCount++;
+                    }
                 }
                 else if (bot.eligibleNow && !disabledBotsLastFrame.Contains(bot))
                 {

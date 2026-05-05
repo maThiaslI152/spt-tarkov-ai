@@ -47,6 +47,12 @@ public class BotSpawnController : BotManagerBase
             WildSpawnType.infectedTagilla,
         };
 
+    /// <summary>Used by SMART dematerialize gate and spawn registration to skip boss/special types.</summary>
+    public static bool IsWildSpawnStrictlyExcluded(WildSpawnType wildSpawnType)
+    {
+        return StrictExclusionList.Contains(wildSpawnType);
+    }
+
     public void ManualUpdate(float currentTime, float deltaTime)
     {
         if (Subscribed && GameEnding)
@@ -129,6 +135,7 @@ public class BotSpawnController : BotManagerBase
         bot.OnBotActivated -= OnBotActivated;
 
         SAINBots.Add(bot);
+        BotsAddedTotal++;
         if (BotGroup1.Count < BotGroup2.Count)
         {
             BotGroup1.Add(bot);
@@ -153,6 +160,12 @@ public class BotSpawnController : BotManagerBase
 
     public HashSet<BotOwner> VanillaBots { get; } = [];
     public HashSet<BotComponent> SAINBots { get; } = [];
+
+    /// <summary>Lifetime count of bots that entered <see cref="SAINBots"/> (telemetry).</summary>
+    public long BotsAddedTotal { get; private set; }
+
+    /// <summary>Lifetime count of bots removed via <see cref="RemoveBot"/> (telemetry).</summary>
+    public long BotsRemovedTotal { get; private set; }
 
     public void Subscribe(BotSpawner botSpawner)
     {
@@ -224,6 +237,7 @@ public class BotSpawnController : BotManagerBase
                     BotGroup2.Remove(botComponent);
                     botComponent.Dispose();
                     BotDictionary.Remove(botOwner.ProfileId);
+                    BotsRemovedTotal++;
                 }
                 else if (botOwner.TryGetComponent(out BotComponent component))
                 {
@@ -233,6 +247,7 @@ public class BotSpawnController : BotManagerBase
                     BotGroup2.Remove(component);
                     component.Dispose();
                     BotDictionary.Remove(botOwner.ProfileId);
+                    BotsRemovedTotal++;
                 }
             }
             else

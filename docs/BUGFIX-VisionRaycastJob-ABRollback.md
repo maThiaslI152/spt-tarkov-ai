@@ -1,5 +1,7 @@
 # Vision Raycast A/B Rollback (Detection Pipeline Debug)
 
+> **Schema note:** Evidence in this doc references **schema 6–7** era CSVs. Current `sain_bigbrain_*.csv` uses **`SchemaVersion = 8`** (`VisionRayEffectiveLosTotal`, `VisionRayEffectiveVisionTotal`, `VisionRayEffectiveShootTotal` — same success predicate as `RaycastResult.CountsAsGameplaySuccess`). See [SAIN_PERFLOG.md](SAIN_PERFLOG.md) and [VISION_BLINDNESS_AND_STUTTER.md](VISION_BLINDNESS_AND_STUTTER.md).
+
 **See also:** [VISION_BLINDNESS_AND_STUTTER.md](VISION_BLINDNESS_AND_STUTTER.md) — full stack diagnosis, `ScheduleBatch` buffer alignment fix, and per-raid vision counter reset.
 
 ## Goal
@@ -8,7 +10,7 @@ Isolate whether the persistent "bots engage but do not visually acquire/shoot pl
 
 ## Trigger Evidence
 
-From the latest `sain_bigbrain` run (schema 6), bots had human goals and combat pressure but zero visual/shoot confirmation:
+From a `sain_bigbrain` run at **schema 6**, bots had human goals and combat pressure but zero visual/shoot confirmation:
 
 - `GoalHumanCount > 0`
 - `GoalHumanEnemyInfoVisibleCount = 0`
@@ -23,6 +25,7 @@ This indicates a failure before final combat arbitration, inside the vision acqu
 ## A/B Change Applied
 
 File changed:
+
 - `OptimizedMod/SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`
 
 Rollback to original cadence behavior for comparison:
@@ -39,7 +42,7 @@ No other vision logic was changed in this A/B step.
 
 Pre-change source backup created at:
 
-- `E:\spt-tarkov-ai\backups\vision_ab_20260504_212844`
+- `backups/vision_ab_20260504_212844/` (repo-relative)
 
 Backed up files:
 
@@ -48,22 +51,18 @@ Backed up files:
 
 ## Test Protocol
 
-1. Build and deploy updated `SAIN.dll`.
+1. Build and deploy updated `SAIN.dll` (and `SAINPerfLog.dll` if CSV schema changed).
 2. Run one controlled raid (prefer Lighthouse for ExUsec reproduction).
 3. Collect:
-   - `sain_bigbrain_*.csv` (schema 6)
+   - `sain_bigbrain_*.csv` — check `SchemaVersion` column (**8** = current)
    - `sain_perf_*.csv`
 4. Compare against the previous run:
-   - Any movement from zero in:
-     - `GoalHumanEnemyInfoVisibleCount`
-     - `GoalHumanSainPartsVisibleCount`
-     - `GoalHumanSainPartsLineOfSightCount`
-     - `GoalHumanSainPartsCanShootCount`
-     - `GoalHumanFinalVisibleCount`
-     - `GoalHumanFinalCanShootCount`
+   - **Human pipeline:** `GoalHumanEnemyInfoVisibleCount`, `GoalHumanSainParts*`, `GoalHumanFinal*`
+   - **Low-level rays (v7+):** `VisionRayAttempt*`, `VisionRayTarget*`, `VisionRayBlocked*`
+   - **Gameplay-aligned success (v8+):** `VisionRayEffectiveLosTotal`, `VisionRayEffectiveVisionTotal`, `VisionRayEffectiveShootTotal` (non-zero attempts with effective success indicate LOS/vision/shoot path recovering even when strict `VisionRayTarget*` stays low indoors)
 5. Decision:
    - If counters rise from zero: timing cadence was a major contributor.
-   - If still zero: next instrument raycast attempt/hit classification in `VisionRaycastJob` write-back path.
+   - If still zero: instrument raycast schedule / clamps / pairing (see canonical vision doc).
 
 ## Why This Step Matters
 
@@ -87,13 +86,16 @@ Follow-up shipped immediately after:
    - Updated `LootingLayer.IsActive()` to hard-return `false` while SAIN reports combat pressure (`SAINExternal.IsBotUnderCombatPressure` via reflection).
    - Purpose: prevent looting layer takeover during active engagement so vision diagnosis is not masked by arbitration noise.
 
+3. **Schema v8 (effective success totals)**
+   - Adds `VisionRayEffective*` columns using `RaycastResult.CountsAsGameplaySuccess` so telemetry matches “did gameplay treat this ray as a success?” vs strict first-hit body collider (`VisionRayTarget*`).
+
 ## Factory Run Follow-up (Schema v7) + Clamp Hardening
 
-Latest analyzed run:
+Example analyzed run (historical path in doc; use your own `sain_perf` folder):
 
-- `E:\SPT 4.0 Dev\BepInEx\LogOutput\sain_perf\sain_bigbrain_20260504_152218_factory4_day_5509df05.csv`
+- `sain_bigbrain_*_factory4_day_*.csv`
 
-Observed on this run:
+Observed on that run:
 
 - Bots had active goals/combat pressure and were concentrated in near/mid distance buckets.
 - `GoalHumanSainPartsVisibleCount`, `GoalHumanSainPartsLineOfSightCount`, `GoalHumanSainPartsCanShootCount`, `GoalHumanFinalVisibleCount`, and `GoalHumanFinalCanShootCount` remained zero.
@@ -101,22 +103,12 @@ Observed on this run:
 
 Interpretation:
 
-- The failure now points earlier than "hit classification"; ray attempt generation itself can degenerate/starve when runtime frequency/ray count values resolve to invalid/zero ranges.
+- The failure pointed earlier than "hit classification"; ray attempt generation could degenerate when frequency / ray count resolved to invalid/zero ranges.
 
-Follow-up hardening fix (shipped):
+Follow-up hardening fix (shipped) in `VisionRaycastJob.cs`:
 
-File:
-- `OptimizedMod/SAIN/SAIN/Classes/BotManager/Jobs/VisionRaycastJob.cs`
-
-Changes:
 1. Clamp `VisionRaycastFrequency` to `>= 1`
 2. Clamp `LookUpdateFrequency` to `>= 1`
 3. Clamp `MaxRaycastsPerEnemy` to `1..3`
 
-Build/deploy:
-
-- Build and deployment completed after applying the clamps.
-
-Next validation criterion:
-
-- In the next comparable run, `VisionRayAttempt*Total` should rise above zero. Once attempts recover, `GoalHumanSainParts*` and `GoalHumanFinal*` should no longer be permanently pinned at zero.
+**Next validation (current stack):** `VisionRayAttempt*` should be non-zero in combat; use **`VisionRayEffective*`** (v8) alongside `GoalHuman*` to judge player visibility pipeline health.

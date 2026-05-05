@@ -9,7 +9,6 @@ using DrakiaXYZ.BigBrain.Brains;
 using EFT;
 using SAIN;
 using SAIN.Components;
-using SAIN.Components.BotController;
 using SAIN.Interop;
 using SAIN.Layers.Combat.Squad;
 using UnityEngine;
@@ -20,10 +19,10 @@ public class RaidPerfCsvLogger : MonoBehaviour
 {
     /// <summary>
     /// BigBrain snapshot CSV:
-    /// v7 adds VisionRaycastJob low-level channel counters (attempt/null/target/blocked for LOS/Vision/Shoot).
-    /// v8 adds EffectiveSuccess* totals (null OR target collider/root — same predicate as RaycastResult.CountsAsGameplaySuccess).
+    /// v5 adds hierarchical-collapse telemetry: squad-command utilization, local decision skips/preemptions,
+    /// and estimated decision CPU delta (executed vs skipped/saved).
     /// </summary>
-    private const int BigBrainSchemaVersion = 8;
+    private const int BigBrainSchemaVersion = 6;
 
     private const int MaxMismatchExemplars = 6;
     private const float NearDistanceMeters = 30f;
@@ -67,27 +66,6 @@ public class RaidPerfCsvLogger : MonoBehaviour
     private double _lastDecisionExecutedCpuMsTotal;
     private double _lastDecisionSavedCpuMsTotal;
 
-    private float _worstFrameMs;
-    private long _lastBotsAddedTotal;
-    private long _lastBotsRemovedTotal;
-    private long _lastPoolHit;
-    private long _lastPoolMiss;
-    private long _lastPoolReturn;
-    private long _lastPoolReturnRejected;
-    private long _lastSmartDematCandidates;
-    private long _lastSmartDematApplied;
-    private long _lastSmartRematLos;
-    private long _lastSmartRematNear;
-    private long _lastAutoSpawnAttempts;
-    private long _lastAutoSpawnFailures;
-    private long _lastAutoMatApplied;
-    private long _lastGcBytes;
-    private string _outputDir = string.Empty;
-    private string _fileStamp = string.Empty;
-    private string _safeLocation = string.Empty;
-    private bool _spawnEventWriterActive;
-    private readonly SpawnEventCsvLogger _spawnEventLogger = new();
-
     public void Initialize(EFT.GameWorld gameWorld)
     {
         _gameWorld = gameWorld;
@@ -102,32 +80,8 @@ public class RaidPerfCsvLogger : MonoBehaviour
         _lastDecisionExecutedCpuMsTotal = 0d;
         _lastDecisionSavedCpuMsTotal = 0d;
 
-        SnapshotPerfTelemetryBaselines();
-
         // Do not open writers here: LocationId is often still empty during GameWorldUnityTickListener.Create.
         GameWorld.OnDispose += OnGameWorldDispose;
-    }
-
-    /// <summary>Reset per-raid deltas for spawn/pool/GC columns (safe if BotManager not ready yet).</summary>
-    private void SnapshotPerfTelemetryBaselines()
-    {
-        _worstFrameMs = 0f;
-        _lastGcBytes = GC.GetTotalMemory(false);
-        BotSpawnController spawn = BotManagerComponent.Instance?.BotSpawnController;
-        _lastBotsAddedTotal = spawn?.BotsAddedTotal ?? 0;
-        _lastBotsRemovedTotal = spawn?.BotsRemovedTotal ?? 0;
-        BotGameObjectPool pool = BotGameObjectPool.Instance;
-        _lastPoolHit = pool?.PoolHitCount ?? 0;
-        _lastPoolMiss = pool?.PoolMissCount ?? 0;
-        _lastPoolReturn = pool?.PoolReturnCount ?? 0;
-        _lastPoolReturnRejected = pool?.PoolReturnRejectedCount ?? 0;
-        _lastSmartDematCandidates = SmartDematTelemetry.SmartDematCandidates;
-        _lastSmartDematApplied = SmartDematTelemetry.SmartDematApplied;
-        _lastSmartRematLos = SmartDematTelemetry.SmartRematLos;
-        _lastSmartRematNear = SmartDematTelemetry.SmartRematNear;
-        _lastAutoSpawnAttempts = SmartDematTelemetry.AutoSpawnAttempts;
-        _lastAutoSpawnFailures = SmartDematTelemetry.AutoSpawnFailures;
-        _lastAutoMatApplied = SmartDematTelemetry.AutoMatApplied;
     }
 
     private void Update()
@@ -137,37 +91,10 @@ public class RaidPerfCsvLogger : MonoBehaviour
             return;
         }
 
-        float frameMsNow = Time.unscaledDeltaTime * 1000f;
-        if (frameMsNow > _worstFrameMs)
-        {
-            _worstFrameMs = frameMsNow;
-        }
-
         TryEnsureWritersOpen();
         if (!_writersOpened)
         {
             return;
-        }
-
-        if (PerfLogPlugin.SpawnEventLog != null && PerfLogPlugin.SpawnEventLog.Value)
-        {
-            if (!_spawnEventWriterActive
-                && !string.IsNullOrEmpty(_outputDir)
-                && !string.IsNullOrEmpty(_fileStamp))
-            {
-                _spawnEventLogger.Open(_outputDir, _fileStamp, _safeLocation, _sessionToken, _raidStartTime);
-                _spawnEventWriterActive = true;
-            }
-
-            if (_spawnEventWriterActive)
-            {
-                _spawnEventLogger.Tick();
-            }
-        }
-        else if (_spawnEventWriterActive)
-        {
-            _spawnEventLogger.Close();
-            _spawnEventWriterActive = false;
         }
 
         _totalFrames++;
@@ -211,8 +138,6 @@ public class RaidPerfCsvLogger : MonoBehaviour
         _runStopwatch.Stop();
         CloseWriter(ref _perfWriter);
         CloseWriter(ref _bigBrainWriter);
-        _spawnEventLogger.Close();
-        _spawnEventWriterActive = false;
         ActivePerfCsvPath = string.Empty;
         ActiveBigBrainCsvPath = string.Empty;
         _writersOpened = false;
@@ -244,11 +169,8 @@ public class RaidPerfCsvLogger : MonoBehaviour
     private void OpenWriters()
     {
         string outputDir = PerfLogPlugin.Instance.GetOutputDirectory();
-        _outputDir = outputDir;
         string stamp = _raidStartUtc.ToString("yyyyMMdd_HHmmss");
-        _fileStamp = stamp;
         string safeLocation = Sanitize(_locationId);
-        _safeLocation = safeLocation;
         _perfPath = Path.Combine(outputDir, $"sain_perf_{stamp}_{safeLocation}_{_sessionToken}.csv");
         _bigBrainPath = Path.Combine(outputDir, $"sain_bigbrain_{stamp}_{safeLocation}_{_sessionToken}.csv");
         ActivePerfCsvPath = _perfPath;
@@ -257,22 +179,9 @@ public class RaidPerfCsvLogger : MonoBehaviour
         UTF8Encoding utf8Bom = new(encoderShouldEmitUTF8Identifier: true);
         _perfWriter = new StreamWriter(_perfPath, append: false, utf8Bom) { AutoFlush = false };
         _perfWriter.WriteLine(
-            "Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhaustedNow,BudgetExhausted%,BudgetHeadroomMs,ProcessedBots,SkippedBots,VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool," +
-            "NonSainFrameMs,WorstFrameMsInInterval,SpawnsThisInterval,DespawnsThisInterval,PoolHitsThisInterval,PoolMissesThisInterval,PoolReturnsThisInterval,PoolReturnRejectedThisInterval,GcAllocDeltaKb," +
-            "SmartDematCandidatesDelta,SmartDematAppliedDelta,SmartRematLosDelta,SmartRematNearDelta,AutoSpawnAttemptsDelta,AutoSpawnFailuresDelta,AutoMatAppliedDelta," +
-            "RaidElapsedSec,LocationId,SessionId"
+            "Timestamp,FPS,FrameTimeMs,BudgetMs,BudgetLimitMs,BudgetUtil%,BudgetExhaustedNow,BudgetExhausted%,BudgetHeadroomMs,ProcessedBots,SkippedBots,VisibleBots,AudibleBots,OccludedBots,OfflineSquads,TotalOnline,Pooled,ActivePool,RaidElapsedSec,LocationId,SessionId"
         );
         _perfWriter.Flush();
-
-        if (PerfLogPlugin.SpawnEventLog != null && PerfLogPlugin.SpawnEventLog.Value)
-        {
-            _spawnEventLogger.Open(outputDir, stamp, safeLocation, _sessionToken, _raidStartTime);
-            _spawnEventWriterActive = true;
-        }
-        else
-        {
-            _spawnEventWriterActive = false;
-        }
 
         if (PerfLogPlugin.EnableBigBrainSnapshots.Value)
         {
@@ -283,7 +192,6 @@ public class RaidPerfCsvLogger : MonoBehaviour
                 "CustomBigBrainActiveCount,SignalGoalEnemy,SignalCombatNonNone,SignalSquadNonNone,SignalPressure,SignalAnyBots," +
                 "DistNearCount,DistMidCount,DistFarCount,EngagedNearCount,EngagedMidCount,EngagedFarCount,ExUsecEngagedNearCount,ExUsecEngagedMidCount,ExUsecEngagedFarCount,CanShootNowNearCount,CanShootNowMidCount,CanShootNowFarCount," +
                 "GoalHumanCount,GoalHumanEnemyInfoVisibleCount,GoalHumanSainPartsVisibleCount,GoalHumanSainPartsLineOfSightCount,GoalHumanSainPartsCanShootCount,GoalHumanFinalVisibleCount,GoalHumanFinalCanShootCount,GoalHumanVisibleDisagreeEnemyInfo0Parts1Count,GoalHumanVisibleDisagreeEnemyInfo1Parts0Count," +
-                "VisionRayAttemptLosTotal,VisionRayAttemptVisionTotal,VisionRayAttemptShootTotal,VisionRayNullLosTotal,VisionRayNullVisionTotal,VisionRayNullShootTotal,VisionRayTargetLosTotal,VisionRayTargetVisionTotal,VisionRayTargetShootTotal,VisionRayBlockedLosTotal,VisionRayBlockedVisionTotal,VisionRayBlockedShootTotal,VisionRayEffectiveLosTotal,VisionRayEffectiveVisionTotal,VisionRayEffectiveShootTotal," +
                 "SquadCommandedNowCount,SquadCommandUtilNowPct,DecisionTicksDelta,DecisionSkipsDelta,DecisionSkipRatePct,DecisionPreemptionsDelta,SquadOrdersReceivedDelta,DecisionCpuExecutedDeltaMs,DecisionCpuSavedDeltaMs,DecisionCpuDeltaMs,DecisionCpuSavedPerSkipMs," +
                 "MismatchLayerHistogram,MismatchReasonHistogram,PerceptionTierHistogram,MismatchExemplars");
             _bigBrainWriter.Flush();
@@ -315,58 +223,17 @@ public class RaidPerfCsvLogger : MonoBehaviour
         float budgetHeadroom = Mathf.Max(0f, budgetLimit - budgetUsed);
         float exhaustedRate = _totalFrames > 0 ? _budgetExhaustedFrames / (float)_totalFrames * 100f : 0f;
 
-        ReadPoolTelemetry(out int pooled, out int activePool, out long poolHits, out long poolMisses, out long poolReturns, out long poolReturnRejected);
-
-        BotSpawnController spawn = BotManagerComponent.Instance?.BotSpawnController;
-        long curAdded = spawn?.BotsAddedTotal ?? 0;
-        long curRemoved = spawn?.BotsRemovedTotal ?? 0;
-        long dSpawn = curAdded - _lastBotsAddedTotal;
-        long dDespawn = curRemoved - _lastBotsRemovedTotal;
-        long dHit = poolHits - _lastPoolHit;
-        long dMiss = poolMisses - _lastPoolMiss;
-        long dReturn = poolReturns - _lastPoolReturn;
-        long dReturnRej = poolReturnRejected - _lastPoolReturnRejected;
-
-        long dSmartCand = SmartDematTelemetry.SmartDematCandidates - _lastSmartDematCandidates;
-        long dSmartApp = SmartDematTelemetry.SmartDematApplied - _lastSmartDematApplied;
-        long dSmartLos = SmartDematTelemetry.SmartRematLos - _lastSmartRematLos;
-        long dSmartNear = SmartDematTelemetry.SmartRematNear - _lastSmartRematNear;
-        long dAutoAtt = SmartDematTelemetry.AutoSpawnAttempts - _lastAutoSpawnAttempts;
-        long dAutoFail = SmartDematTelemetry.AutoSpawnFailures - _lastAutoSpawnFailures;
-        long dAutoMat = SmartDematTelemetry.AutoMatApplied - _lastAutoMatApplied;
-
-        long gcNow = GC.GetTotalMemory(false);
-        double gcDeltaKb = (gcNow - _lastGcBytes) / 1024.0;
-
-        float nonSainFrameMs = Mathf.Max(0f, frameMs - budgetUsed);
-        float worstInInterval = _worstFrameMs;
+        int pooled = 0;
+        int activePool = 0;
+        TryReadPoolStats(ref pooled, ref activePool);
 
         float raidElapsed = Mathf.Max(0f, Time.time - _raidStartTime);
         string rowLocation = CsvEscape(ResolveLocationIdBestEffort(_gameWorld) ?? _locationId ?? "unknown");
 
         _perfWriter.WriteLine(
-            $"{DateTime.UtcNow:O},{fps:F1},{frameMs:F2},{budgetUsed:F3},{budgetLimit:F1},{budgetUtil:F1},{(scheduler.BudgetExhaustedLastFrame ? 1 : 0)},{exhaustedRate:F1},{budgetHeadroom:F3},{scheduler.BotsProcessedThisFrame},{scheduler.BotsSkippedThisFrame},{scheduler.VisibleBotsLastFrame},{scheduler.AudibleBotsLastFrame},{scheduler.OccludedBotsLastFrame},{scheduler.OfflineSquadCount},{scheduler.TotalOnlineBots},{pooled},{activePool}," +
-            $"{nonSainFrameMs:F2},{worstInInterval:F2},{dSpawn},{dDespawn},{dHit},{dMiss},{dReturn},{dReturnRej},{gcDeltaKb:F2}," +
-            $"{dSmartCand},{dSmartApp},{dSmartLos},{dSmartNear},{dAutoAtt},{dAutoFail},{dAutoMat}," +
-            $"{raidElapsed:F1},{rowLocation},{CsvEscape(_sessionToken)}"
+            $"{DateTime.UtcNow:O},{fps:F1},{frameMs:F2},{budgetUsed:F3},{budgetLimit:F1},{budgetUtil:F1},{(scheduler.BudgetExhaustedLastFrame ? 1 : 0)},{exhaustedRate:F1},{budgetHeadroom:F3},{scheduler.BotsProcessedThisFrame},{scheduler.BotsSkippedThisFrame},{scheduler.VisibleBotsLastFrame},{scheduler.AudibleBotsLastFrame},{scheduler.OccludedBotsLastFrame},{scheduler.OfflineSquadCount},{scheduler.TotalOnlineBots},{pooled},{activePool},{raidElapsed:F1},{rowLocation},{CsvEscape(_sessionToken)}"
         );
         _perfWriter.Flush();
-
-        _lastGcBytes = gcNow;
-        _lastBotsAddedTotal = curAdded;
-        _lastBotsRemovedTotal = curRemoved;
-        _lastPoolHit = poolHits;
-        _lastPoolMiss = poolMisses;
-        _lastPoolReturn = poolReturns;
-        _lastPoolReturnRejected = poolReturnRejected;
-        _lastSmartDematCandidates = SmartDematTelemetry.SmartDematCandidates;
-        _lastSmartDematApplied = SmartDematTelemetry.SmartDematApplied;
-        _lastSmartRematLos = SmartDematTelemetry.SmartRematLos;
-        _lastSmartRematNear = SmartDematTelemetry.SmartRematNear;
-        _lastAutoSpawnAttempts = SmartDematTelemetry.AutoSpawnAttempts;
-        _lastAutoSpawnFailures = SmartDematTelemetry.AutoSpawnFailures;
-        _lastAutoMatApplied = SmartDematTelemetry.AutoMatApplied;
-        _worstFrameMs = 0f;
 
         if (PerfLogPlugin.WriteLatestAlias.Value)
         {
@@ -693,14 +560,12 @@ public class RaidPerfCsvLogger : MonoBehaviour
         double decisionSkipRatePct = decisionTicksDelta > 0 ? decisionSkipsDelta / (double)decisionTicksDelta * 100d : 0d;
         double squadCommandUtilNowPct = sampled > 0 ? squadCommandedNowCount / (double)sampled * 100d : 0d;
         double decisionCpuSavedPerSkipMs = decisionSkipsDelta > 0 ? decisionSavedCpuDeltaMs / decisionSkipsDelta : 0d;
-        VisionRaycastJob.VisionRaycastDiagnosticsSnapshot visionDiag = VisionRaycastJob.GetDiagnosticsSnapshot();
 
         _bigBrainWriter.WriteLine(
             $"{BigBrainSchemaVersion},{DateTime.UtcNow:O},{raidElapsed:F1},{bots.Count},{sampled},\"{histogramString}\",{mismatchCount},{snapLocation},{CsvEscape(_sessionToken)}," +
             $"{customBigBrainActive},{signalGoalEnemy},{signalCombatNonNone},{signalSquadNonNone},{signalPressure},{signalAnyBots}," +
             $"{distNearCount},{distMidCount},{distFarCount},{engagedNearCount},{engagedMidCount},{engagedFarCount},{exUsecEngagedNearCount},{exUsecEngagedMidCount},{exUsecEngagedFarCount},{canShootNowNearCount},{canShootNowMidCount},{canShootNowFarCount}," +
             $"{goalHumanCount},{goalHumanEnemyInfoVisibleCount},{goalHumanSainPartsVisibleCount},{goalHumanSainPartsLineOfSightCount},{goalHumanSainPartsCanShootCount},{goalHumanFinalVisibleCount},{goalHumanFinalCanShootCount},{goalHumanVisibleDisagreeEnemyInfo0Parts1Count},{goalHumanVisibleDisagreeEnemyInfo1Parts0Count}," +
-                $"{visionDiag.AttemptsLineOfSight},{visionDiag.AttemptsVision},{visionDiag.AttemptsShoot},{visionDiag.HitsNullLineOfSight},{visionDiag.HitsNullVision},{visionDiag.HitsNullShoot},{visionDiag.HitsTargetLineOfSight},{visionDiag.HitsTargetVision},{visionDiag.HitsTargetShoot},{visionDiag.HitsBlockedLineOfSight},{visionDiag.HitsBlockedVision},{visionDiag.HitsBlockedShoot},{visionDiag.EffectiveSuccessLineOfSight},{visionDiag.EffectiveSuccessVision},{visionDiag.EffectiveSuccessShoot}," +
             $"{squadCommandedNowCount},{squadCommandUtilNowPct:F1},{decisionTicksDelta},{decisionSkipsDelta},{decisionSkipRatePct:F1},{decisionPreemptionsDelta},{squadOrdersReceivedDelta},{decisionExecutedCpuDeltaMs:F3},{decisionSavedCpuDeltaMs:F3},{decisionCpuDeltaMs:F3},{decisionCpuSavedPerSkipMs:F4}," +
             $"\"{mismatchLayerString}\",\"{mismatchReasonString}\",\"{tierString}\",{CsvEscape(exemplarsJoined)}"
         );
@@ -822,33 +687,39 @@ public class RaidPerfCsvLogger : MonoBehaviour
         return sb.ToString();
     }
 
-    private static void ReadPoolTelemetry(
-        out int pooled,
-        out int activePool,
-        out long poolHits,
-        out long poolMisses,
-        out long poolReturns,
-        out long poolReturnRejected)
+    private static void TryReadPoolStats(ref int pooled, ref int activePool)
     {
-        pooled = 0;
-        activePool = 0;
-        poolHits = 0;
-        poolMisses = 0;
-        poolReturns = 0;
-        poolReturnRejected = 0;
-
         BotGameObjectPool pool = BotGameObjectPool.Instance;
         if (pool == null)
         {
             return;
         }
 
-        pooled = pool.TotalPooledCount;
-        activePool = pool.ActivePooledCount;
-        poolHits = pool.PoolHitCount;
-        poolMisses = pool.PoolMissCount;
-        poolReturns = pool.PoolReturnCount;
-        poolReturnRejected = pool.PoolReturnRejectedCount;
+        try
+        {
+            PropertyInfo totalProperty = typeof(BotGameObjectPool).GetProperty("TotalPooledCount", BindingFlags.Public | BindingFlags.Instance);
+            if (totalProperty != null)
+            {
+                pooled = (int)totalProperty.GetValue(pool);
+            }
+        }
+        catch
+        {
+            pooled = 0;
+        }
+
+        try
+        {
+            PropertyInfo activeProperty = typeof(BotGameObjectPool).GetProperty("ActivePooledCount", BindingFlags.Public | BindingFlags.Instance);
+            if (activeProperty != null)
+            {
+                activePool = (int)activeProperty.GetValue(pool);
+            }
+        }
+        catch
+        {
+            activePool = 0;
+        }
     }
 
     /// <summary>

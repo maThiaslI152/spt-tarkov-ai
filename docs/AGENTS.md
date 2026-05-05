@@ -28,6 +28,7 @@ Short onboarding for **AI coding agents** (Cursor, CLI, etc.). The canonical map
 | **Blind AI + stutter (vision job vs layers)** | [VISION_BLINDNESS_AND_STUTTER.md](VISION_BLINDNESS_AND_STUTTER.md) | `VisionRaycastJob.cs`, `LootingLayer.cs`, `SAINLayer.cs`, `AIFrameBudgetScheduler.cs` |
 | **Offline squads / distant combat slice** | [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md) | `OfflineSquadWorldSync.cs`, `OfflineCombatResolver.cs`, `CombatAudioSpoofer.cs` |
 | **Frozen bots / AILimit + SAIN deadlock** | [BUGFIX-AILimitSAIN-Deadlock.md](BUGFIX-AILimitSAIN-Deadlock.md) | [SAIN_AILIMIT_DEMATERIALIZATION.md](SAIN_AILIMIT_DEMATERIALIZATION.md) (full inventory), then `AIFrameBudgetScheduler.cs` (`RecheckActivation`), `BotDematerializationController.cs`, `OfflineSquadMaterialization.cs`, `AILimit/Component.cs` |
+| **Full SMART demat/remat + `auto_*` materialize (Phase 1+2)** | [INDEX.md](../INDEX.md) → [.cursor/plans/smart_demat_remat_65de6b98.plan.md](../.cursor/plans/smart_demat_remat_65de6b98.plan.md) (conflict matrix + **R1–R7 resolutions**) | After [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md); implement gate, AILimit arbitration, pool idempotency, ABPS cap defer, `TryGetFromPool` wiring |
 | **Rogue Lighthouse behavior** | [STATUS_BIGBRAIN_AND_ROGUE.md](STATUS_BIGBRAIN_AND_ROGUE.md) | [ROGUE_BASE_DEFENSE_PLAN.md](ROGUE_BASE_DEFENSE_PLAN.md) — coordinator + squad-layer bootstrap (`ShouldBootstrapRogueDefenseCombatLayer`) |
 | **What shipped vs pending** | [PROGRESS.md](PROGRESS.md) | [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md) |
 
@@ -76,7 +77,7 @@ Other mods: each has a `.csproj` or `.sln` under `OptimizedMod/<Mod>/` (BigBrain
 
 | Artifact | Typical location |
 |----------|------------------|
-| Per-raid perf CSV | `BepInEx/LogOutput/sain_perf/` (timestamped; see [SAIN_PERFLOG.md](SAIN_PERFLOG.md)) |
+| Per-raid perf CSV | `BepInEx/LogOutput/sain_perf/` — `sain_perf_*.csv` includes spawn vs tick columns; optional `sain_spawn_events_*.csv` (F12 **Spawn Event Log**); see [SAIN_PERFLOG.md](SAIN_PERFLOG.md) |
 | Verbose diagnostics | `BepInEx/LogOutput/LogOutput.log` — enable only via **SAINPerfLog** F12 diagnostic toggle when chasing `[SAIN DIAG]` |
 
 ---

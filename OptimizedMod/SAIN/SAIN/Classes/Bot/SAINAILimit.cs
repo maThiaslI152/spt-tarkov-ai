@@ -127,6 +127,18 @@ public class SAINAILimit : BotComponentClassBase
         if (Bot.EnemyController.ActiveHumanEnemy)
             return PerceptionTier.Visible;
 
+        // If bot has a human enemy in line-of-sight, it's actively looking at the player
+        if (Bot.EnemyController.HumanEnemyInLineofSight)
+            return PerceptionTier.Visible;
+
+        // Check all known enemies for a visible/can-shoot human — the bot is actively
+        // engaged even if EFT's ActiveHumanEnemy flag hasn't flipped yet (timing gap).
+        foreach (var enemy in Bot.EnemyController.EnemiesArray)
+        {
+            if (enemy != null && !enemy.IsAI && enemy.IsVisible && enemy.CanShoot)
+                return PerceptionTier.Visible;
+        }
+
         // Check if player can SEE this bot (frustum + raycast, amortized)
         if (CheckPlayerCanSeeBot())
             return PerceptionTier.Visible;

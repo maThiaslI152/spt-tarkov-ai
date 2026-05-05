@@ -1,6 +1,7 @@
 # Bugfix: SAINAILimit Audibility Detection Broken — Bots Not Fighting
 
-> **Date:** 2026-05-03 | **Status:** Fixed & Deployed | **File:** `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs`
+> **Date:** 2026-05-03 | **Doc tidied:** 2026-05-06 (line refs softened)  
+> **Status:** Fixed & Deployed | **File:** `OptimizedMod/SAIN/SAIN/Classes/Bot/SAINAILimit.cs`
 
 ---
 
@@ -16,7 +17,7 @@
 
 ### Bug 1: `CheckPlayerCanHearBot()` always returned `false`
 
-**Location:** `SAINAILimit.cs` lines 183-231 (original)
+**Location:** `SAINAILimit.cs` — `CheckPlayerCanHearBot()` (historical line numbers omitted)
 
 All audibility detection logic was **stubbed out as TODOs** — every check for gunfire, sprinting, and grenade sounds was commented out:
 

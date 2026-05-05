@@ -6,8 +6,8 @@ using UnityEngine;
 namespace SAIN.Components;
 
 /// <summary>
-/// Phase 1 seam for SMART dematerialize / rematerialize. Phase 2 (AILimit) will call
-/// <see cref="RequestDematerialize"/> / <see cref="RequestRematerialize"/> instead of toggling GameObjects directly.
+/// SMART dematerialize / rematerialize: pool GameObjects, register <c>demat_*</c> offline rows,
+/// and arbitrate multiple park reasons (AILimit + SMART LOS gate).
 /// </summary>
 public sealed class BotDematerializationController
 {
@@ -19,6 +19,7 @@ public sealed class BotDematerializationController
         public string SquadId;
         public string BotTypeKey;
         public bool Pooled;
+        public DematParkReason Holders;
     }
 
     public BotDematerializationController(BotManagerComponent manager)
@@ -36,21 +37,39 @@ public sealed class BotDematerializationController
         return !string.IsNullOrEmpty(profileId) && _byProfileId.ContainsKey(profileId);
     }
 
+    private static DematParkReason ReasonFromString(string reason)
+    {
+        if (string.IsNullOrEmpty(reason))
+        {
+            return DematParkReason.SmartLos;
+        }
+
+        if (reason.IndexOf("ailimit", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return DematParkReason.Ailimit;
+        }
+
+        return DematParkReason.SmartLos;
+    }
+
     /// <summary>
     /// Park one bot: register a single-member <see cref="OfflineSquad"/> for statistical combat,
     /// enqueue the GameObject in <see cref="BotGameObjectPool"/>, and track profile for rematerialize.
+    /// If already parked, merges <paramref name="reason"/> into <see cref="DematParkReason"/> without re-pooling.
     /// </summary>
     public bool RequestDematerialize(BotComponent bot, string reason)
     {
-        _ = reason;
         if (bot == null || bot.IsDead || string.IsNullOrEmpty(bot.ProfileId))
         {
             return false;
         }
 
-        if (_byProfileId.ContainsKey(bot.ProfileId))
+        DematParkReason flag = ReasonFromString(reason);
+
+        if (_byProfileId.TryGetValue(bot.ProfileId, out DematerializedEntry existing))
         {
-            return false;
+            existing.Holders |= flag;
+            return true;
         }
 
         AIFrameBudgetScheduler scheduler = _manager.BudgetScheduler;
@@ -88,14 +107,36 @@ public sealed class BotDematerializationController
             SquadId = squad.SquadId,
             BotTypeKey = botType,
             Pooled = true,
+            Holders = flag,
         };
 
         return true;
     }
 
-    /// <summary>
-    /// Restore a bot parked by <see cref="RequestDematerialize"/>: unregister offline squad, activate GameObject / bot state, re-sync SAIN activation.
-    /// </summary>
+    /// <summary>Release one park holder. Full rematerialize only when no holders remain.</summary>
+    public DematReleaseResult TryReleaseParkReason(BotComponent bot, DematParkReason toClear)
+    {
+        if (bot == null || string.IsNullOrEmpty(bot.ProfileId))
+        {
+            return DematReleaseResult.NotTracked;
+        }
+
+        if (!_byProfileId.TryGetValue(bot.ProfileId, out DematerializedEntry entry))
+        {
+            return DematReleaseResult.NotTracked;
+        }
+
+        entry.Holders &= ~toClear;
+        if (entry.Holders != DematParkReason.None)
+        {
+            return DematReleaseResult.PartialStillHeld;
+        }
+
+        PerformFullRematerialize(entry, bot);
+        return DematReleaseResult.FullyRematerialized;
+    }
+
+    /// <summary>Force full rematerialize (e.g. AILimit plugin disabled path).</summary>
     public bool RequestRematerialize(BotComponent bot)
     {
         if (bot == null || string.IsNullOrEmpty(bot.ProfileId))
@@ -108,6 +149,13 @@ public sealed class BotDematerializationController
             return false;
         }
 
+        entry.Holders = DematParkReason.None;
+        PerformFullRematerialize(entry, bot);
+        return true;
+    }
+
+    private void PerformFullRematerialize(DematerializedEntry entry, BotComponent bot)
+    {
         AIFrameBudgetScheduler scheduler = _manager.BudgetScheduler;
         scheduler?.UnregisterOfflineSquad(entry.SquadId);
 
@@ -152,6 +200,6 @@ public sealed class BotDematerializationController
             _manager.Pool.RegisterActiveBot(go);
         }
 
-        return true;
+        SainDematPolicy.NotifyFullRematerialized(bot.ProfileId);
     }
 }

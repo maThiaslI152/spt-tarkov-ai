@@ -1,4 +1,7 @@
-# BUGFIX — SAINPerfLog distance + engagement telemetry (Schema v4)
+# BUGFIX — SAINPerfLog distance + engagement telemetry (introduced in schema v4)
+
+> **Canonical schema today:** BigBrain snapshot **`SchemaVersion = 8`** in `OptimizedMod/SAINPerfLog/Components/RaidPerfCsvLogger.cs`.  
+> This document describes the **v4 milestone** (distance + engagement columns). Later schemas add decision CPU, vision ray counters, `VisionRayEffective*`, etc. — see [SAIN_PERFLOG.md](SAIN_PERFLOG.md).
 
 ## Why this change was needed
 
@@ -7,7 +10,7 @@ For this project, distance is a core principle: we need to answer "what AI does 
 
 Without distance-banded counters, audits could confirm layer mismatch but could not prove whether bots near the player were engaging, shooting, or staying in non-combat layers.
 
-## What was implemented
+## What was implemented (schema v4)
 
 Updated `OptimizedMod/SAINPerfLog/Components/RaidPerfCsvLogger.cs`:
 
@@ -40,9 +43,9 @@ Updated `OptimizedMod/SAINPerfLog/Components/RaidPerfCsvLogger.cs`:
   - `TryGetMainPlayerPosition(out Vector3 position)`
   - If unavailable, distance counters remain `0` for that sample instead of crashing telemetry.
 
-## CSV impact
+## CSV impact (still present in v8)
 
-`sain_bigbrain_*.csv` now includes these additional columns (after existing signal columns and before mismatch histograms):
+`sain_bigbrain_*.csv` includes these columns (among others added in v5–v8):
 
 - `DistNearCount,DistMidCount,DistFarCount`
 - `EngagedNearCount,EngagedMidCount,EngagedFarCount`
@@ -60,6 +63,8 @@ This enables direct runtime answers to:
 
 ## Build/deploy
 
-- Built: `OptimizedMod/SAINPerfLog/SAINPerfLog.csproj` (Release)
-- Deploy target: `E:\SPT 4.0 Dev\BepInEx\plugins\SAINPerfLog\SAINPerfLog.dll`
+```bash
+dotnet build OptimizedMod/SAINPerfLog/SAINPerfLog.csproj -c Release
+```
 
+Install `SAINPerfLog.dll` per [MOD_BUILD_AND_DEPLOY.md](MOD_BUILD_AND_DEPLOY.md).

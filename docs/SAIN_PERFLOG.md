@@ -1,6 +1,6 @@
 # SAINPerfLog — standalone raid telemetry (implemented)
 
-> **Last updated:** 2026-05-05  
+> **Last updated:** 2026-05-06  
 > **Status:** Shipped in-repo under `OptimizedMod/SAINPerfLog/`. This document is the **canonical summary** of what was built and how it relates to **SAIN**. For original design rationale and migration notes, see [SAIN_PERFLOG_STANDALONE_PLAN.md](SAIN_PERFLOG_STANDALONE_PLAN.md).
 
 **Agents:** [INDEX.md](../INDEX.md) · [AGENTS.md](AGENTS.md) (builds + read order).
@@ -16,6 +16,8 @@
 | Per-raid performance CSV (timestamped files, no cross-raid overwrite) | **SAINPerfLog** (`RaidPerfCsvLogger`) |
 | Optional sparse BigBrain aggregate snapshot CSV | **SAINPerfLog** |
 | **F12** read-only lines (FPS rolling average, `AIFrameBudgetScheduler` stats, active CSV paths) | **SAINPerfLog** (`PerfLogPlugin`, category **`SAINPerfLog (F12)`**) |
+| **Perf CSV spawn vs tick attribution** (`NonSainFrameMs`, worst frame in interval, spawn/despawn/pool deltas, GC delta) | **SAINPerfLog** + **SAIN** counters (`BotSpawnController`, `BotGameObjectPool`) |
+| **Optional spawn-event CSV** (per-frame counter deltas; verbose) | **SAINPerfLog** — F12 **`4. Spawn Event Log`** (default off) |
 | **Diagnostic logging** toggle for spammy `[SAIN DIAG]` traces | **SAINPerfLog** (same F12 category) |
 | `AIFrameBudgetScheduler`, perception tiers, bot ticks | **SAIN** (unchanged responsibility) |
 | Gating diagnostic spam inside SAIN when the perf plugin is present | **SAIN** via [`SainPerfLogInterop`](../OptimizedMod/SAIN/SAIN/Interop/SainPerfLogInterop.cs) |
@@ -42,7 +44,7 @@ Install **both** DLLs for full behavior:
 - `BepInEx/plugins/SAIN/SAIN.dll` (or your pack layout)
 - `BepInEx/plugins/SAINPerfLog/SAINPerfLog.dll`
 
-You may update **`SAINPerfLog.dll` alone** when only telemetry/F12 changes, as long as the **interop contract** below stays compatible.
+For **spawn-attribution columns** (`SpawnsThisInterval`, pool counters, `ActivePool`), deploy **both** `SAIN.dll` and `SAINPerfLog.dll` from this tree (counters live in SAIN). You may update **`SAINPerfLog.dll` alone** when only consumer-side CSV/F12 changes **and** SAIN already exposes the counters.
 
 ---
 
@@ -51,7 +53,7 @@ You may update **`SAINPerfLog.dll` alone** when only telemetry/F12 changes, as l
 | Category | Purpose |
 |----------|---------|
 | **SAINPerfLog** | Auto logging on/off, perf CSV interval, BigBrain snapshot options, output directory relative to BepInEx root, optional `*_latest.csv` aliases |
-| **SAINPerfLog (F12)** | **F12 Status Lines** (read-only refresh), **Diagnostic Logging** (spam to `LogOutput.log`), read-only FPS / budget / bot / active path lines |
+| **SAINPerfLog (F12)** | **F12 Status Lines** (read-only refresh), **Diagnostic Logging**, **BigBrain verbose sample**, **`4. Spawn Event Log`** (optional `sain_spawn_events_*.csv`), read-only FPS / budget / bot / perf+bigbrain+spawn paths |
 
 Open with **F12 → Configuration Manager → SAINPerfLog** (plugin list).
 
@@ -65,13 +67,16 @@ Default directory (configurable): `BepInEx/LogOutput/sain_perf/` (relative to Be
 |----------|-----------------|
 | Per-raid perf CSV | `sain_perf_{UtcTimestamp}_{LocationId}_{SessionToken}.csv` — **`LocationId`** is taken from `GameWorld.LocationId` (or `MainPlayer.Location`) **after** raid init, so filenames match EFT map ids (e.g. `lighthouse`, `bigmap`). Writers open on the first frame where the id is non-empty, or after **30 s** fallback to `unknown` if still unset. |
 | Per-raid BigBrain snapshot CSV | `sain_bigbrain_{UtcTimestamp}_{LocationId}_{SessionToken}.csv` (when snapshots enabled) — same naming rules. |
+| Optional spawn-event CSV | `sain_spawn_events_{UtcTimestamp}_{LocationId}_{SessionToken}.csv` when **F12 → `4. Spawn Event Log`** is on — one row per unit of spawn/despawn/pool counter delta (verbose; short repro raids only). |
 | Optional aliases | `sain_perf_latest.csv`, `sain_bigbrain_latest.csv` when **Write latest aliases** is enabled |
 
 Writers **open shortly after** raid world creation (deferred from `GameWorldUnityTickListener.Create` so `LocationId` is populated) and **close on `GameWorld.OnDispose`** (hideout skipped; Fika client path skipped when applicable). Files are **UTF-8 with BOM** for easier Excel import.
 
 ### CSV schemas (current)
 
-**Perf row** (header includes): existing budget/tier/pool columns plus trailing **`RaidElapsedSec`**, **`LocationId`**, **`SessionId`** (same short token as in the filename) for joins and dashboards.
+**Perf row** (trailing columns, after `Pooled` / `ActivePool`): **`NonSainFrameMs`** (`FrameTimeMs − BudgetMs`, clamped ≥ 0), **`WorstFrameMsInInterval`** (max `Time.unscaledDeltaTime` ms since previous perf row), **`SpawnsThisInterval`** / **`DespawnsThisInterval`** (deltas of `BotSpawnController.BotsAddedTotal` / `BotsRemovedTotal` — bots entering/leaving `SAINBots` on activation/remove), **`PoolHitsThisInterval`** / **`PoolMissesThisInterval`** / **`PoolReturnsThisInterval`** / **`PoolReturnRejectedThisInterval`** (deltas of `BotGameObjectPool` telemetry counters; **hits/misses stay 0** until something calls `TryGetFromPool`), **`GcAllocDeltaKb`** (`GC.GetTotalMemory(false)` delta since previous row / 1024), then **`RaidElapsedSec`**, **`LocationId`**, **`SessionId`**.
+
+**Spawn-event row** (optional): `Timestamp`, `RaidElapsedSec`, `Event` (`Spawn` \| `Despawn` \| `PoolHit` \| `PoolMiss` \| `PoolReturn` \| `PoolReturnRejected`), `BotType` (placeholder `?` until a future per-bot buffer), `FrameMs`, `GcAllocDeltaKb` (frame-to-frame), `PoolHit` (1 for `PoolHit` events else 0), `TotalOnline`, `Pooled`, `SessionId`.
 
 **BigBrain snapshot** — **`SchemaVersion` = 8**: v7 columns plus **`VisionRayEffectiveLosTotal`**, **`VisionRayEffectiveVisionTotal`**, **`VisionRayEffectiveShootTotal`** (cumulative raid totals; same success rule as `RaycastResult.CountsAsGameplaySuccess`: **null hit OR body collider/root match**).
 - Distance buckets to main player: `DistNearCount` (<30m), `DistMidCount` (30-80m), `DistFarCount` (>=80m).

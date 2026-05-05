@@ -1,6 +1,6 @@
 # SAIN ↔ AILimit: dematerialization, pool, and scheduler fixes
 
-> **Last updated:** 2026-05-04  
+> **Last updated:** 2026-05-05  
 > **Audience:** maintainers and agents implementing performance / SMART-adjacent behavior.  
 > **Companion docs:** [BUGFIX-AILimitSAIN-Deadlock.md](BUGFIX-AILimitSAIN-Deadlock.md) (symptom, root cause, CSV), [SMART_OFFLINE_COMBAT.md](SMART_OFFLINE_COMBAT.md) (offline slice vs full SMART), [INTEGRATION.md](INTEGRATION.md) (AILimit ↔ ecosystem).
 
@@ -20,7 +20,7 @@ This document is the **full change record** for the phased work: **scheduler sel
 |-------|------|--------|
 | **1** | Break the latch; correct `TotalOnlineBots`; introduce pool + dematerialization seams; align offline combat with `demat_*` | **Shipped** |
 | **2** | Route AILimit deactivate/reactivate through SAIN dematerialization + pool with legacy fallback | **Shipped** |
-| **3** | Hearing-radius **rematerialization** for `demat_*` so pooled bots are not stranded outside AILimit top-`N` ordering | **Partial** (`demat_*` only; no `auto_*` spawn-from-stats) |
+| **3** | Hearing + **LOS** rematerialization for `demat_*`; SMART distance/LOS demat; `auto_*` first-engagement casualties reconciled to live bots when the player nears | **Shipped (v1)** — see §5–6; spawn-from-stats / full loot still open |
 
 ---
 
@@ -47,7 +47,7 @@ This document is the **full change record** for the phased work: **scheduler sel
 | Piece | Path | Responsibility |
 |-------|------|----------------|
 | Pool | `OptimizedMod/SAIN/SAIN/Components/BotGameObjectPool.cs` | `ReturnToPool`, `TryGetFromPool`, telemetry helpers; **`TryRemoveFromPool(GameObject)`** removes a specific instance from queues so the same raid bot is not dequeued twice after rematerialize. |
-| Controller | `OptimizedMod/SAIN/SAIN/Components/BotDematerializationController.cs` | **`RequestDematerialize(BotComponent, reason)`**: build single-bot `OfflineSquad` with id prefix `demat_` + `OfflineSquadWorldSync.BuildDematerializeSquadForBot`, register on scheduler, `ReturnToPool`, set **`EBotState.NonActive`**, track profile in `_byProfileId` with **`Pooled`** flag. **`RequestRematerialize`**: unregister squad, **`TryRemoveFromPool`** if pooled, `SetActive(true)`, `BotState.Active`, stand-by wake, **`BotComponent.RecheckActivation`**, **`Pool.RegisterActiveBot`**. **`IsDematerialized(profileId)`**. |
+| Controller | `OptimizedMod/SAIN/SAIN/Components/BotDematerializationController.cs` | **`RequestDematerialize(BotComponent, reason)`**: build single-bot `OfflineSquad` with id prefix `demat_` + `OfflineSquadWorldSync.BuildDematerializeSquadForBot`, register on scheduler, `ReturnToPool`, set **`EBotState.NonActive`**, track profile in `_byProfileId` with **`Pooled`** flag and **`DematParkReason`** holders (AILimit vs SMART merge on repeat request). **`TryReleaseParkReason`**: partial vs full remat when the last holder clears. **`RequestRematerialize`**: full clear + unregister + pool pull + activate. **`IsDematerialized(profileId)`**. |
 | Manager wiring | `OptimizedMod/SAIN/SAIN/Components/BotManagerComponent.cs` | **`Pool`** and **`Dematerialization`** are **new instances** each **`Activate`** (new raid / manager). **`Dispose`**: **`Dematerialization.ResetForNewRaid()`** and **`Pool.ClearPool()`**. |
 | Offline combat | `OptimizedMod/SAIN/SAIN/Components/AIFrameBudgetScheduler.cs` | **`IsAutoManagedSquad`**: ids starting with `auto_` **or** `demat_` skip **`ApplyOfflineCasualties`** member trimming (live or parked rows must not be gutted by statistical casualties). |
 
@@ -75,24 +75,31 @@ This document is the **full change record** for the phased work: **scheduler sel
 
 ---
 
-## 5. Phase 3 — Proximity rematerialization (`demat_*`)
+## 5. Phase 3 — Rematerialization (`demat_*`) + SMART demat + `auto_*` reconcile
 
 | Piece | Path | Behavior |
 |-------|------|----------|
-| API | `OptimizedMod/SAIN/SAIN/Components/OfflineSquadMaterialization.cs` | **`TryBeginMaterialize(squad, zoneCenter, hearingRangeMeters, humanPlayer)`**: only **`demat_*`** squads; human must be alive non-AI; distance ≤ **`hearingRangeMeters × RecommendedRadiusVsHearing` (1.5)**; resolve **`profileId`** from `Members[0].BotId` or squad id suffix; **`RequestRematerialize`** if still dematerialized. |
-| Drive loop | **`TryRematerializeDematSquadsNearHumans(BotManagerComponent, currentTime)`** | Snapshot **`OfflineSquads`**, throttle **0.25 s**; nominal hearing from **`SAINPlugin.LoadedPreset.GlobalSettings.General.AILimit.MaxHearingRanges[Far]`** default **100 m**. |
-| Call site | `OptimizedMod/SAIN/SAIN/Components/BotManagerComponent.cs` — **`ManualUpdate`** | After **`OfflineSquadWorldSync.TrySync`**, **before** **`BudgetScheduler.ProcessFrame`**. |
+| Proximity API | `OptimizedMod/SAIN/SAIN/Components/OfflineSquadMaterialization.cs` | **`TryBeginMaterialize`**: only **`demat_*`** squads; human alive non-AI; distance ≤ **hearing × 1.5**; **`TryReleaseParkReason(..., DematParkReason.SmartLos)`** when SMART held the bot (AILimit may still hold); full remat when no holders → **`RequestRematerialize`**. |
+| Proximity drive | **`TryRematerializeDematSquadsNearHumans`** | Snapshot **`OfflineSquads`**, throttle **0.25 s**; nominal hearing from preset **`AILimit.MaxHearingRanges[Far]`** (~100 m). |
+| LOS drive | **`TryRematerializeDematSquadsLosFromHumans`** | Throttled pass: any human’s main camera sees squad anchor → remat path above; **`SmartRematLos`** telemetry. |
+| SMART demat | `Components/SmartDematSystems.cs` | **`SmartDematerializeGate.TryApply`**: ~180 m, ~8 s no LOS, exclusions + combat pressure; **`SainDematPolicy`** cooldown after full remat. |
+| `auto_*` reconcile | `Components/AIFrameBudgetScheduler.ApplyOfflineCasualties`, `Components/AutoSquadMaterialization.cs` | First **auto vs auto** offline pair per raid stores **`PendingWorldCasualties`**; when main player is **near** squad center and under **`MaxBots`**, apply kills to matching **live** SAIN bots (not new spawns). |
 
-**Not in scope for Phase 3:** materializing **`auto_*`** statistical squads into spawned bots, applying **`OfflineCombatResult`** to world entities, or Harmony on vanilla **`OnBotRemoved`**.
+**Out of scope (follow-ups):** `BotCreator` / ABPS **new** spawns from stats-only rows, full corpse/loot from resolver, Harmony on vanilla **`OnBotRemoved`** for non-SAIN paths.
 
 ---
 
 ## 6. Runtime order (raid tick)
 
 1. `BotManagerComponent.ManualUpdate` runs subsystems.  
-2. `OfflineSquadWorldSync.TrySync` (periodic `auto_*` registration refresh).  
-3. **`OfflineSquadMaterialization.TryRematerializeDematSquadsNearHumans`** (throttled proximity pass).  
-4. **`BudgetScheduler.ProcessFrame`**: offline combat resolution (if ≥ 2 hostile squads, throttled); **per-bot `RecheckActivation`**; tiered processing under ms cap.
+2. **`OfflineSquadWorldSync.TrySync`** — periodic `auto_*` registration refresh.  
+3. **`OfflineSquadMaterialization.TryRematerializeDematSquadsNearHumans`** — throttled **proximity** `demat_*` remat.  
+4. **`OfflineSquadMaterialization.TryRematerializeDematSquadsLosFromHumans`** — throttled **LOS** `demat_*` remat.  
+5. **`AutoSquadMaterialization.TryTick`** — cap-gated `auto_*` **pending casualty** application to live bots.  
+6. **`SmartDematerializeGate.TryApply`** — SMART dematerialize pass.  
+7. **`BudgetScheduler.ProcessFrame`** — offline combat (≥2 hostile squads, ≤1 Hz); **per-bot `RecheckActivation`**; tiered processing under ms cap.
+
+**Rule:** remat passes run **before** SMART demat so bots eligible for proximity/LOS return are not dematerialized in the same ordering pass without cooldown.
 
 ---
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
@@ -242,7 +243,9 @@ public class VisionRaycastJob : BotManagerBase
                     yield return null;
 
                     _handle.Complete();
+                    float visionTime = Time.time;
                     AnalyzeHits(hits, commands, enemyCount, partCount, raycastChecks);
+                    FinalizeVisionHandoffFromRayBatch(_enemies, enemyCount, visionTime);
 
                     hits.Dispose();
                     commands.Dispose();
@@ -427,6 +430,37 @@ public class VisionRaycastJob : BotManagerBase
         }
 
         return commands;
+    }
+
+    /// <summary>
+    /// Enemy <see cref="Enemy.TickEnemy"/> (and thus <see cref="EnemyVisionClass.TickEnemy"/>) runs at the enemy-controller
+    /// cadence (~10–20 Hz) while <see cref="AnalyzeHits"/> writes <see cref="EnemyPartDataClass"/> ray results as soon as
+    /// the batch completes. Re-run part aggregation and <see cref="EnemyVisionClass.UpdateVisibleState"/> here so
+    /// <see cref="Enemy.IsVisible"/> / <see cref="Enemy.CanShoot"/> match fresh rays in the same frame (fixes sustained
+    /// <c>GoalHumanFinal*</c> near zero on large maps when telemetry still shows ray attempts).
+    /// </summary>
+    private static void FinalizeVisionHandoffFromRayBatch(List<Enemy> enemies, int enemyCount, float time)
+    {
+        for (int i = 0; i < enemyCount; i++)
+        {
+            Enemy enemy = enemies[i];
+            if (enemy == null || !enemy.CheckValid())
+            {
+                continue;
+            }
+
+            try
+            {
+                EnemyVisionClass vision = enemy.Vision;
+                vision.EnemyParts.Update(time);
+                vision.UpdateVisibleState(time);
+            }
+            catch (Exception ex)
+            {
+                // Never fault the vision coroutine: one bad enemy would stop all ray batches for every bot.
+                Logger.LogWarning($"[VisionRaycastJob] FinalizeVisionHandoff failed for enemy index {i}: {ex.Message}");
+            }
+        }
     }
 
     private void AnalyzeHits(NativeArray<RaycastHit> raycastHits, NativeArray<RaycastCommand> commands, int enemyCount, int partCount, int raycastChecks)

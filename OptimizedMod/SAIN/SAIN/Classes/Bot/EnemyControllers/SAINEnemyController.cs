@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using EFT;
 using SAIN.Components;
+using SAIN.Components.PlayerComponentSpace;
 using SAIN.Helpers;
 using SAIN.Plugin;
 using SAIN.Preset.GlobalSettings;
+using UnityEngine;
 
 namespace SAIN.SAINComponent.Classes.EnemyClasses;
 
@@ -167,6 +169,11 @@ public class SAINEnemyController : BotComponentClassBase
             return;
         var perfSettings = SAINPlugin.LoadedPreset?.GlobalSettings?.General?.Performance;
         _nextEnemyUpdateTime = currentTime + ((perfSettings != null && perfSettings.PerformanceMode) ? 0.1f : 0.05f);
+
+        // Proactively scan for human players that should be enemies.
+        // EFT's BotsGroup may not have flagged the player yet on large maps (Customs, Woods, etc.),
+        // so we bridge the gap by checking nearby humans every tick.
+        scanForHumanPlayerEnemies(bot);
 
         List<IPlayer> Allies = bot.BotOwner?.BotsGroup?.Allies;
         if (Allies == null)
@@ -574,12 +581,59 @@ public class SAINEnemyController : BotComponentClassBase
         CheckAddEnemy(last.EnemyPlayer);
     }
 
+    /// <summary>
+    /// Proactively scans for human players within range and adds them as SAIN enemies.
+    /// EFT's BotsGroup.OnEnemyAdd may fire late or never for distant players on large maps;
+    /// this ensures the bot always tracks humans within its expected engagement range
+    /// so the vision system and decision manager can process them.
+    /// </summary>
+    private void scanForHumanPlayerEnemies(BotComponent bot)
+    {
+        if (_nextHumanScanTime > Time.time)
+            return;
+        _nextHumanScanTime = Time.time + 0.25f;
+
+        var gw = GameWorldComponent.Instance;
+        if (gw == null) return;
+
+        // Use the AILimit ranges to determine max scan distance (scan to Narnia range)
+        var aiLimit = GlobalSettingsClass.Instance?.General?.AILimit;
+        float maxDist = 250f;
+        if (aiLimit?.AILimitRanges != null)
+        {
+            maxDist = Mathf.Max(maxDist,
+                aiLimit.AILimitRanges.TryGetValue(AILimitSetting.Narnia, out float n) ? n : 400f);
+        }
+        float maxDistSqr = maxDist * maxDist;
+
+        Vector3 botPos = bot.Position;
+        foreach (PlayerComponent human in gw.PlayerTracker.AlivePlayerArray)
+        {
+            if (human == null || human.IsAI || human.ProfileId == bot.ProfileId)
+                continue;
+
+            // Skip if already tracked
+            if (Enemies.ContainsKey(human.ProfileId))
+                continue;
+
+            // Distance check
+            Vector3 toHuman = human.Transform.Position - botPos;
+            if (toHuman.sqrMagnitude > maxDistSqr)
+                continue;
+
+            // Add proactively — tryAddEnemy has its own null/validity guards
+            if (human.Player != null)
+                CheckAddEnemy(human.Player);
+        }
+    }
+
     private Enemy _goalEnemy;
 
     private readonly List<string> _allyIdsToRemove = [];
     private readonly List<string> _invalidIdsToRemove = [];
     private readonly HashSet<string> _alliesHash = [];
     private float _nextEnemyUpdateTime;
+    private float _nextHumanScanTime;
 
     private readonly EnemyListController _listController;
 }

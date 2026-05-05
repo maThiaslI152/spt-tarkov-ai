@@ -1,6 +1,7 @@
 # Bugfix: AI Work-Stop Loop & Squad Issues — Layer Cache Race, Squad Persistence, Player Engagement
 
-> **Date:** 2026-05-04 | **Status:** Fixed & Deployed | **Files:** 6 files across SAIN
+> **Date:** 2026-05-04 | **Doc tidied:** 2026-05-06 (cache wording + priority numbers)  
+> **Status:** Fixed & Deployed | **Files:** 6 files across SAIN
 
 ---
 
@@ -15,7 +16,7 @@
 **Factory Raid (2026-05-04 08:51):**
 - 4 persistent mismatches for 15+ minutes: `_BugsBunny_~pmcBEAR~Looting`, `AKA-Anton1o~pmcBEAR~BotMind_Questing`, `Thekoenman~pmcUSEC~Looting`, `MT_Militia~pmcUSEC~Looting`
 - ALL have: `G1` (GoalEnemy), `C1` (CombatDecision != None), `P1` (pressure), **`SL0` (SAINLayersActive = false)**, **`S0` (Squad = None)**
-- Mismatch reason: `thirdPartyOrVanilla` — BigBrain picks LootingBots (62) or BotMind_Questing over SAIN layers (69–70)
+- Mismatch reason: `thirdPartyOrVanilla` — BigBrain picks LootingBots (62) or BotMind_Questing over SAIN combat layers (**~69–70 in that build**; fork **defaults are now ~77–78** squad/solo per `LayerSettings.cs`)
 
 **Lighthouse Raid (2026-05-04 09:11):**
 - Same pattern with exUsec rogues: `Rib-eye~exUsec~Looting`, `Corsair~exUsec~Looting`, `Auron~exUsec~Looting`, `Dakota~exUsec~PatrolFollower`
@@ -42,7 +43,7 @@ if (Time.time - _lastIsActiveCheckTime >= IsActiveCheckInterval)
 return _cachedIsActive;  // stale false returned during throttle window
 ```
 
-When the 10Hz decision pipeline briefly set a decision to `None` (between combat decisions), the SAIN layer cache went `false` and stayed `false` for up to 200ms (squad layer) or 33ms (combat layer). BigBrain then selected the next-highest active layer — LootingBots (62) — even though SAIN Combat (69–70) should have won.
+When the 10Hz decision pipeline briefly set a decision to `None` (between combat decisions), the SAIN layer cache went `false` and stayed `false` for up to 200ms (squad layer) or 33ms (combat layer). BigBrain then selected the next-highest active layer — LootingBots (62) — even though SAIN combat layers should have won (priorities **~69–70** in logs from that build; **~77–78** in current repo defaults).
 
 The race was:
 1. Decision pipeline sets combat decision, layer becomes active, cache = true
@@ -77,7 +78,7 @@ The existing propagation method had distance checks (`isInCommunicationRange()`)
 
 **File:** `OptimizedMod/SAIN/SAIN/Layers/SAINLayer.cs`
 
-Replaced `CheckIsActiveWithCache()` to **never cache the `false` state**. The cache only prevents re-computation when already active. When inactive, it re-checks immediately every call:
+Replaced `CheckIsActiveWithCache()` so **`true` is never delayed**: every call runs `computeUncached()`; when the layer is active, the cache stays hot. When inactive, **`false→false` is throttled** (same interval as before) to reduce `IsActive()` cost, but **`true→false` applies immediately** (`wasActive` branch) so there is no stale-false window after combat was active.
 
 ```csharp
 protected bool CheckIsActiveWithCache(Func<bool> computeUncached)
@@ -193,7 +194,7 @@ Properly unsubscribes in both `RemoveFromSquad()` and `getSquad()` to prevent do
 
 | # | File | Change |
 |---|------|--------|
-| 1 | `OptimizedMod/SAIN/SAIN/Layers/SAINLayer.cs` | Fix `CheckIsActiveWithCache()` race: never cache `false` state |
+| 1 | `OptimizedMod/SAIN/SAIN/Layers/SAINLayer.cs` | Fix `CheckIsActiveWithCache()` race: always refresh `true`; throttle only `false→false` |
 | 2 | `OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/CombatSquadLayer.cs` | Remove `CurrentCombatDecision != None` gate; stay active during combat |
 | 3 | `OptimizedMod/SAIN/SAIN/Layers/Combat/Squad/SquadCombatCoordinator.cs` | Remove `CurrentCombatDecision != None` skip; coordinate continuously; expose state |
 | 4 | `OptimizedMod/SAIN/SAIN/Classes/Bot/Decision/BotDecisionManager.cs` | Defer to coordinator orders when active; preserve combat decisions |
@@ -205,7 +206,8 @@ Properly unsubscribes in both `RemoveFromSquad()` and `getSquad()` to prevent do
 ## Design Rationale
 
 ### Cache Race Fix (Fix 1) — Why not just remove the cache entirely?
-The cache serves a purpose: `IsActive()` on some SAIN layers (especially CombatSolo) can be expensive because it evaluates enemy positions, cover status, and weapon readiness. The cache prevents this computation every BigBrain frame (~33ms). The fix keeps the cache for the `active → active` path (no unnecessary re-computation) while eliminating the stale-false window by always immediately accepting `true` from the uncached computation.
+
+`IsActive()` on some SAIN layers (especially CombatSolo) can be expensive. The implementation still throttles repeated **`false`** evaluations when the layer was already inactive, but it **never** delays a transition to **`true`**, and it **does not** throttle deactivation right after the layer was active — removing the LootingBots / quest “win” during brief `None` windows from the 10 Hz decision pipeline.
 
 ### Squad Persistence (Fix 2) — Why three coordinated changes?
 The squad layer persistence requires all three changes to work together:

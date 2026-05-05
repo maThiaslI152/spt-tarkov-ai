@@ -1,3 +1,4 @@
+using EFT;
 using HarmonyLib;
 using SAIN.Components;
 using UnityEngine;
@@ -32,6 +33,19 @@ internal static class BotPoolPatches
         // Only intercept bot GameObjects
         if (!IsBotGameObject(go))
             return true;
+
+        int iid = go.GetInstanceID();
+        if (Pool.IsInstanceInPoolQueue(iid))
+        {
+            return false;
+        }
+
+        if (go.TryGetComponent(out BotOwner bo)
+            && !string.IsNullOrEmpty(bo.ProfileId)
+            && BotManagerComponent.Instance?.Dematerialization?.IsDematerialized(bo.ProfileId) == true)
+        {
+            return false;
+        }
 
         // Determine bot type from the GameObject
         string botType = GetBotType(go);

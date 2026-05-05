@@ -1,41 +1,106 @@
 ---
 name: SAIN-optimization-fix-plan
-overview: Historical plan — much of this merged into `SAIN\SAIN\`. Root `OptimizedMod\SAIN\SAIN.csproj` already compiles inner sources via selective `<Compile Remove>`. Duplicate `Layers\` at mod root was removed; agents should verify docs vs `SAIN\SAIN\` only.
+overview: "User direction (2026-05-06): expand budgeting beyond SAIN-only ticks (1B SAIN+interop, balanced triage) and roadmap toward unified multi-mod control. Phases D–H must stay compatible with the shipped SMART demat/remat + pool slice (see Demat/remat compatibility). Historical tree-merge appendix remains reference-only."
 todos:
-  - id: a1-perception-tier-enum
-    content: Add PerceptionTier enum to SAIN\SAIN\SAINEnum.cs
-    status: pending
-  - id: a2-tick-interval-setter
-    content: Change TickInterval setter in SAIN\SAIN\Classes\Bot\BotBase.cs (protected set → set; default 1f/30f)
-    status: pending
-  - id: a3-sain-ai-limit-replace
-    content: Replace SAIN\SAIN\Classes\Bot\SAINAILimit.cs with root version (PerceptionTier, visibility, audibility checks)
-    status: pending
-  - id: a4-bot-component-tier
-    content: Add CurrentPerceptionTier property to SAIN\SAIN\Components\BotComponent.cs
-    status: pending
-  - id: a5-delete-duplicates
-    content: Delete 4 root-level duplicate files (SAINEnum.cs, Classes\Bot\SAINAILimit.cs, Classes\Bot\BotBase.cs, Components\BotComponent.cs)
-    status: pending
-  - id: b1-squad-coordinator-fix
-    content: "Move SquadCombatCoordinator.cs into SAIN\SAIN\Layers\Combat\Squad\ and fix EnemyList/SetSquadDecision calls"
-    status: pending
-  - id: b2-scheduler-singleton
-    content: "Move AIFrameBudgetScheduler.cs into SAIN\SAIN\Components\ and add public static Instance singleton"
-    status: pending
-  - id: b3-perf-monitor-fix
-    content: "Move SAINPerformanceMonitor.cs into SAIN\SAIN\Components\ and replace reflection with public properties on AIFrameBudgetScheduler"
-    status: pending
-  - id: b4-bot-pool-move
-    content: "Move BotPoolPatches.cs into SAIN\SAIN\Patches\ (no code changes, document global Object.Destroy hook risk)"
-    status: pending
-  - id: c1-csproj-fix
-    content: "Root SAIN.csproj already compiles SAIN\\SAIN\\ via SDK glob + selective Compile Remove — verify when adding files under excluded paths (Layers/, Components/, etc.)"
+  - id: hist-a-b-superseded
+    content: "Historical Phases A–B (tree merge / perf monitor): already reflected in current `OptimizedMod/SAIN/SAIN/` — do not re-execute; see appendix."
     status: completed
+  - id: c1-csproj-verify-only
+    content: "When touching `OptimizedMod/SAIN/SAIN.csproj`, only adjust explicit `Compile Remove` globs for stray root duplicates — do NOT remove inner `SAIN/SAIN/**` from compilation (not applicable; inner tree is the ship set)."
+    status: completed
+  - id: d1-visibility-finalization
+    content: "Phase D — Fix `GoalHumanFinal*` handoff (`EnemyVisionClass`, `EnemyPartDataClass` decay, `EnemyInfo` sync); validate vs `docs/BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md`."
+    status: completed
+  - id: e1-budget-domains
+    content: "Phase E — Introduce schedulable budget domains inside/near `AIFrameBudgetScheduler` (beyond raw `TickInterval` throttling)."
+    status: pending
+  - id: f1-interop-gates-1b
+    content: "Phase F (1B) — Extend `SAINExternal` / LootingBots reflection seams / diagnostics so combat-pressure defers third-party layers without breaking idle quest/loot."
+    status: pending
+  - id: g1-spawn-smoothing
+    content: "Phase G — Spawn/activation smoothing (`BotSpawnController`, pool remat) per perf CSV; preserve SMART demat/remat invariants (pool idempotency, exclusion list, remat before combat-ready)."
+    status: pending
+  - id: h1-unified-orchestrator-rfc
+    content: "Phase H — RFC for unified multi-mod orchestration (multi-release); depends on stable D–G metrics."
+    status: pending
 isProject: false
 ---
 
 # SAIN Optimization Fix Plan
+
+## Current direction (2026-05-06) — agreed scope
+
+**User choices**
+
+- **Scope (1B):** SAIN + interop — first pass includes SAIN-owned budgeting/deferral **and** targeted interop so non-SAIN combat pressure does not fight the scheduler (LootingBots / BotMind-style arbitration where we already have reflection or `SAINExternal` seams).
+- **Triage bias (balanced):** protect **proximity + combat pressure + GoalEnemy** paths first, but still spread background work so FPS does not collapse on wave spawns.
+- **Long-term product goal:** **merge / unify mod control surfaces** (single orchestration layer, shared telemetry, shared tick domains) so one budget policy can govern more than `BotComponent.ManualUpdate` alone.
+
+**Why FPS still drops when SAIN budget looks tiny**
+
+- The **2 ms cap** only bounds work routed through `AIFrameBudgetScheduler.ProcessFrame` → `BotComponent.ManualUpdate`.
+- Spawn bursts, EFT native AI, other plugins, physics/render/GC dominate `FrameTimeMs` / `NonSainFrameMs` in your perf CSVs.
+
+**Implementation strategy (phased)**
+
+1. **Phase D — Visibility finalization (highest player-facing priority)** — Fix `GoalHumanFinal*` handoff (`EnemyVisionClass.UpdateVisibleState`, part decay `SUCCESS_PERIOD`, `EnemyInfo` sync) per [docs/BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md](docs/BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md) (repo root). Validate with Lighthouse + one control map.
+
+2. **Phase E — Budget domains inside SAIN** — Introduce explicit domains (e.g. `Perception`, `EnemyList`, `Coordination`, `Background`) with token budgets inside `AIFrameBudgetScheduler` or adjacent coordinator — **move** work into schedulable units instead of only shrinking `TickInterval`.
+
+3. **Phase F — Interop gates (1B)** — Extend existing seams (`SAINExternal`, LootingBots reflection gate, BigBrain mismatch diagnostics) so **combat-pressure windows** defer third-party layers without breaking QB when not under pressure.
+
+4. **Phase G — Spawn / activation smoothing (FPS spike)** — Use `BotSpawnController` + pool telemetry already in `sain_perf_*.csv` to cap **per-frame activation work** (stagger `Activate`, defer non-critical init for pooled remats). This targets your “FPS dies on bot spawn” symptom directly. **Must remain compatible** with the demat/remat + `BotGameObjectPool` pipeline (see **Demat / remat compatibility** below): do not bypass `BotDematerializationController`, break pool idempotency, or weaken `BotSpawnController.IsWildSpawnStrictlyExcluded` semantics shared with SMART gating.
+
+5. **Phase H — Unified mod control (your merge suggestion; multi-release)** — Architectural consolidation: shared **orchestrator** project or `OptimizationCore`-style façade that owns tick registration, budget policy, and cross-mod hooks — **not** a single PR. Prerequisite: stable Phase D–G metrics.
+
+**Exit criteria**
+
+- `GoalHumanFinalVisibleCount` / `GoalHumanFinalCanShootCount` correlate with contact on non-Factory maps.
+- `NonSainFrameMs` spikes correlate with spawn waves; after Phase G, worst-frame spikes measurably lower at same bot counts.
+- `MismatchCombatSignals` / `thirdPartyOrVanilla` trend down under sustained pressure without starving quest/loot when not pressured.
+- **Demat/remat:** After pooled remat, bots reach **combat-ready** state without deadlock (AILimit latch + SAIN `BotActive`); `Pool*ThisInterval` / spawn CSV still interpret correctly.
+
+## Demat / remat compatibility (SMART + AILimit slice)
+
+This plan layers on top of the **shipped** distance/LOS dematerialize path, pool recycle, and proximity/LOS rematerialize behavior. Treat [.cursor/plans/smart_demat_remat_65de6b98.plan.md](.cursor/plans/smart_demat_remat_65de6b98.plan.md) and [docs/SAIN_AILIMIT_DEMATERIALIZATION.md](docs/SAIN_AILIMIT_DEMATERIALIZATION.md) as the **contract** for those systems.
+
+**Core components (do not regress without an explicit migration doc)**
+
+- **Dematerialize:** `BotDematerializationController` → `BotGameObjectPool.ReturnToPool` (parked / `demat_*` path).
+- **Pool:** idempotent return, Destroy-prefix safety, `ResetForPoolRecycle` on `SAINAILimit` / bot reuse expectations.
+- **Rematerialize:** `OfflineSquadMaterialization` (proximity + LOS throttled remat), `AutoSquadMaterialization` (cap-gated `auto_*` casualty reconcile on live bots).
+- **SMART gate:** `SmartDematerializeGate` and related helpers in `SmartDematSystems.cs` (`SainDematPolicy`, `DematParkReason`) — respect AILimit arbitration and squad parking.
+- **Spawn exclusions:** `BotSpawnController.IsWildSpawnStrictlyExcluded` — shared by SMART demat and spawn registration; any Phase **G** change to spawn flow must keep boss/special exclusions identical or centrally owned.
+
+**Phase-by-phase compatibility rules**
+
+- **D (visibility):** Fixes apply to **active** and **post-remat** bots alike. Ensure `EnemyInfo` / `EnemyVisionClass` / part decay do not assume “never pooled.” Validate one **remat** scenario (distant park → near player → visible again) on the same maps as pure visibility tests.
+- **E (budget domains):** Scheduler splits must **not** skip or reorder `RecheckActivation` / AILimit-driven activation edges relative to demat without review. Pooled or freshly rematerialized bots may sit in **Occluded** tier briefly — domain budgets should still allow minimum perception + activation handoff ticks.
+- **F (interop):** Combat-pressure and layer deferral must **not** leave bots permanently dematerialized, block remat triggers, or fight `DematParkReason` arbitration (LootingBots/QB inactive while parked is OK; **stuck inactive after remat** is not).
+- **G (spawn smoothing):** Staggering `Activate` / deferred init must preserve: single authoritative path into/out of the pool, no double-activate, remat completes before relying on `GoalEnemy` / combat pressure. Prefer **queue + budget** over skipping pool pulls. `BotSpawnPoolBridge` today is telemetry-only — future EFT `BotCreator` ↔ pool integration must follow the same invariants.
+- **Telemetry:** Changes to frame cadence must keep `SpawnsThisInterval`, `DespawnsThisInterval`, `Pool*ThisInterval`, and `NonSainFrameMs` semantically aligned so before/after demat-aware regressions stay comparable.
+
+**Workstream ordering**
+
+- Finish or **freeze** a SMART demat/remat + pool change set before large **Phase G** edits, or test both together on every wave/remat scenario.
+- **Phase G** and SMART spawn/pool work touch the same files (`BotManagerComponent`, `BotSpawnController`, `BotGameObjectPool`, materialization helpers); serialize ownership or merge in one branch.
+
+### Final consistency check (2026-05-06)
+
+- **User scope (1B + balanced):** Captured in **Current direction** and YAML todos **f1**, **e1**.
+- **Phase D first:** Correct ordering for player-visible regressions before broad scheduler refactors.
+- **Doc link:** Use repo-root path [docs/BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md](docs/BUGFIX-MultiMap-GoalHumanFinalVisibility-And-Arbitration.md) (avoid `../../` — depends on viewer CWD).
+- **YAML A–B vs repo:** Superseded — `PerceptionTier`, public `TickInterval`, `CurrentPerceptionTier`, inner `AIFrameBudgetScheduler` already exist under `OptimizedMod/SAIN/SAIN/`; root duplicate merge items are not active work.
+- **B3 `SAINPerformanceMonitor`:** Obsolete for execution — not in shipping SAIN tree; telemetry is **SAINPerfLog** (see project docs).
+- **Phase C “remove inner SAIN Compile Remove”:** Wrong for current tree — `SAIN.csproj` excludes **root-level** stray globs only; inner `SAIN/SAIN/**` is the compiled ship set. Do not delete a non-existent `Compile Remove="SAIN\**\*.cs"` pattern.
+- **Phase H:** Correctly scoped as multi-release RFC, not bundled into Phase D.
+- **Demat/remat:** Section **Demat / remat compatibility** added; Phase **G** todo and exit criteria extended accordingly.
+
+---
+
+## Historical appendix — SAIN tree merge checklist (mostly completed in repo)
+
+The remainder of this document describes an earlier **duplicate-file merge into `SAIN\\SAIN\\`**. Many items are already shipped; keep only as archaeology when touching csproj layout.
 
 ## Architecture Context
 
@@ -163,27 +228,25 @@ No code changes. The global `Object.Destroy` Harmony prefix hook is risky (inter
 
 ## Phase C: Fix build configuration
 
-### C1. Root `SAIN.csproj`
+### C1. Root `SAIN.csproj` (current state — do not regress)
 
-Remove the two `Compile Remove` lines that exclude the SAIN\SAIN\ source:
-```xml
-<!-- REMOVE these lines: -->
-<Compile Remove="SAIN\**\*.cs" />
-<Compile Remove="SAINServerMod\**\*.cs" />
-```
+The active pattern is: **exclude stray compile roots at `OptimizedMod/SAIN/` (not under `SAIN/SAIN/`)** via explicit `Compile Remove` globs (`*.cs`, `Classes\**\*.cs`, …), while **`SAIN\SAIN\**\*.cs` remains the compiled shipping tree**.
 
-After A5 deletes the 4 root duplicates and B1-B4 move the new files into `SAIN\SAIN\`, any remaining root-level `.cs` files (e.g., `SAINPlugin.cs`, `Types/Jobs/SainJobTemplate.cs`) may still conflict with their `SAIN\SAIN\` counterparts. If conflicts arise, either:
-- Delete the root duplicates (preferred), or
-- Add specific `Compile Remove` entries for conflicting root files
+**Do not** “remove exclusions to compile SAIN\SAIN” using outdated instructions about `Compile Remove="SAIN\**\*.cs"` — that pattern is **not** what the current csproj uses.
+
+When adding new source files:
+
+- Prefer placing them under `OptimizedMod/SAIN/SAIN/`.
+- If you must add files under excluded root folders, add/adjust **targeted** `Compile Remove` entries — never accidentally exclude `SAIN\SAIN\`.
 
 ---
 
-## Execution Order
+## Execution order (active work — post-appendix)
 
-1. **A1** + **A2** + **A3** + **A4** — Apply changes to SAIN\SAIN\ originals (independent, can be parallel)
-2. **A5** — Delete 4 root duplicates (after confirming A1-A4)
-3. **B1** — Move + fix SquadCombatCoordinator
-4. **B2** — Move + fix AIFrameBudgetScheduler (add singleton + public properties)
-5. **B3** — Move + fix SAINPerformanceMonitor (replace reflection)
-6. **B4** — Move BotPoolPatches (no code changes)
-7. **C1** — Fix root SAIN.csproj (remove Compile Remove exclusions, verify build)
+1. **D** — Visibility finalization (`GoalHumanFinal*` / `EnemyVisionClass` pipeline), including **post-remat** visibility smoke.
+2. **E** — Budget domains (schedulable units beyond `BotComponent.ManualUpdate`), preserving activation/demat tick ordering.
+3. **F** — Interop gates (1B): combat-pressure vs third-party layers, without breaking demat/remat latches.
+4. **G** — Spawn / activation smoothing (FPS spikes, `NonSainFrameMs`) **subject to Demat / remat compatibility**.
+5. **H** — Unified orchestrator RFC (multi-release).
+
+**Appendix A–C:** historical; verify against repo before repeating any step.
