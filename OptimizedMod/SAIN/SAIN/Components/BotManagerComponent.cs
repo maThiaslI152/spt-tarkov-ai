@@ -86,7 +86,11 @@ public class BotManagerComponent : MonoBehaviour
     public BotDematerializationController Dematerialization { get; private set; }
 
     private float _nextBigBrainDiagTime;
+    private float _nextBigBrainVerifyTime;
+    private int _bigBrainVerifyPasses;
     private const float BigBrainDiagIntervalSeconds = 3f;
+    private const float BigBrainVerifyIntervalSeconds = 10f;
+    private const int BigBrainVerifyMaxPasses = 12;
     private const float HumanProximitySq = 90f * 90f;
 
     public void PlayerEnviromentChanged(string profileID, IndoorTrigger trigger)
@@ -146,6 +150,7 @@ public class BotManagerComponent : MonoBehaviour
 
         SyncAiFrameBudgetFromPreset();
         MaybeLogBigBrainArbitrationHints(currentTime);
+        VerifyBigBrainCustomLayerActivation(currentTime);
         OfflineSquadWorldSync.TrySync(this, currentTime);
         OfflineSquadMaterialization.TryRematerializeDematSquadsNearHumans(this, currentTime);
         OfflineSquadMaterialization.TryRematerializeDematSquadsLosFromHumans(this, currentTime);
@@ -270,6 +275,12 @@ public class BotManagerComponent : MonoBehaviour
             return "sainCombatLayer";
         }
 
+        bool customBigBrainActive = BrainManager.IsCustomLayerActive(owner);
+        if (pressure && !customBigBrainActive)
+        {
+            return "sainCustomLayerInactive";
+        }
+
         if (LooksLikeThirdPartyOrVanillaLayer(layer))
         {
             return "thirdPartyOrVanilla";
@@ -373,12 +384,74 @@ public class BotManagerComponent : MonoBehaviour
             return false;
         }
 
+        if (!BrainManager.IsCustomLayerActive(owner) && SAINExternal.IsBotUnderCombatPressure(owner))
+        {
+            return true;
+        }
+
         if (LooksLikeThirdPartyOrVanillaLayer(activeLayer))
         {
             return true;
         }
 
         return SAINExternal.IsBotUnderCombatPressure(owner);
+    }
+
+    /// <summary>
+    /// Periodically verifies that SAIN-enabled bots have custom BigBrain layers active.
+    /// If pressure exists and bot remains BB0, trigger a guarded global re-apply pass.
+    /// </summary>
+    private void VerifyBigBrainCustomLayerActivation(float currentTime)
+    {
+        if (currentTime < _nextBigBrainVerifyTime || _bigBrainVerifyPasses >= BigBrainVerifyMaxPasses)
+        {
+            return;
+        }
+
+        _nextBigBrainVerifyTime = currentTime + BigBrainVerifyIntervalSeconds;
+        _bigBrainVerifyPasses++;
+
+        int sampled = 0;
+        int bb0 = 0;
+        int bb0UnderPressure = 0;
+
+        foreach (BotComponent bot in BotSpawnController.SAINBots)
+        {
+            if (bot == null || bot.IsDead || !bot.BotActive)
+            {
+                continue;
+            }
+
+            BotOwner owner = bot.BotOwner;
+            if (owner == null || owner.IsDead)
+            {
+                continue;
+            }
+
+            sampled++;
+            bool custom = BrainManager.IsCustomLayerActive(owner);
+            if (custom)
+            {
+                continue;
+            }
+
+            bb0++;
+            bool pressure = SAINExternal.IsBotUnderCombatPressure(owner);
+            if (pressure)
+            {
+                bb0UnderPressure++;
+                string layer = BrainManager.GetActiveLayerName(owner);
+                BigBrainHandler.TryRecoverCustomLayerActivation(owner, layer, "verifyPass");
+            }
+        }
+
+        if (bb0 > 0)
+        {
+            Logger.LogWarning(
+                $"[SAIN][BigBrainVerify] pass={_bigBrainVerifyPasses}/{BigBrainVerifyMaxPasses} "
+                + $"sampled={sampled} bb0={bb0} bb0Pressure={bb0UnderPressure}"
+            );
+        }
     }
 
     public void Dispose()

@@ -31,6 +31,29 @@ Two items remain blocked pending SPT runtime on Windows.
 
 ---
 
+## 2026-05-05 Session: Final plan check + deep-dive SAIN comparison (Option A locked)
+
+### Findings documented
+
+| Area | Notes |
+| ---- | ----- |
+| **BigBrain upstream comparison** | `OptimizedMod/BigBrain` core (`BigBrainPlugin`, `BrainManager`, `CustomLayerWrapper`) is behavior-equivalent to upstream `DrakiaXYZ/SPT-BigBrain` 1.4.0 for custom-layer registration/activation flow. |
+| **Customs failure signature (isolation run)** | Session `e644f438` (`bigmap`): `CustomBigBrainActiveCount=0`, `GoalHumanCount=0`, `SignalCombatNonNone=0`, while `VisionRayAttempt*`/`VisionRayEffective*` advance and `SainBotsSampled` is non-zero. |
+| **Factory control signature** | Session `d36fa0c5` (`factory4_day`): `CustomBigBrainActiveCount>0`, `SAIN : Combat Layer` dominant, non-trivial `GoalHumanFinal*` conversion. |
+| **Layer arbitration mismatch** | Customs mismatch exemplars remain `BB0` with vanilla layers (`LootPatrol`, `PtrlBirdEye`, `Kill logic`, `Utility peace`, `StayAtPos`) under pressure windows. |
+| **SAIN divergence surface** | Deep compare (`SAIN/SAIN` vs `OptimizedMod/SAIN/SAIN`) shows large rewrites in `BigBrainHandler`, `BotManagerComponent`, `SAINEnemyController`, `VisionRaycastJob`, scheduler/demat systems; regression scope is SAIN integration path. |
+
+### Plan decision
+
+1. **Option A first (locked):** patch SAIN BigBrain arbitration/integration path (layer strip coverage + BB0 runtime re-apply verification).  
+2. **Option B second (conditional):** enemy-goal fallback seeding only if Option A does not recover Customs activation metrics.  
+
+### Plan artifact
+
+- Active execution plan: `C:\Users\farcr\.cursor\plans\bigbrain-activation-fix_11b8389e.plan.md`
+
+---
+
 ## 2026-05-05 Session: Multi-map runtime triage (pre-fix baseline)
 
 ### Findings documented
